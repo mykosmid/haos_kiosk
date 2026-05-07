@@ -2,7 +2,7 @@
 
 ## v1.3.2 - April 2026
 
-- Added explicit BUILD_FROM location to Dockerfile for ha core 202i6.04+
+- Added explicit BUILD_FROM location to Dockerfile for ha core 2026.04+
 
 ## v1.3.1 - April 2026
 
