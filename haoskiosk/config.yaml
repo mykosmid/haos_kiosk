@@ -1,9 +1,7 @@
 ---
 name: "HAOS Kiosk Display"
-description: |
-  Start X server and browser on local HAOS server and display dashboards in
-  kiosk mode (Jeff Kosowsky)
-version: "1.3.2"
+description: "Minimal Xorg + luakit browser kiosk for Home Assistant touchscreen display"
+version: "1.4.0"
 slug: "haoskiosk"
 url: https://github.com/mykosmid/haos_kiosk/tree/main/haoskiosk
 
@@ -31,7 +29,6 @@ devices:
   - /dev/dri/card0
   - /dev/dri/card1
   - /dev/dri/renderD128
-
   - /dev/input/event0
   - /dev/input/event1
   - /dev/input/event2
@@ -70,22 +67,12 @@ options:
   ha_url: "http://localhost:8123"
   ha_dashboard: ""
   login_delay: 1.0
-  zoom_level: 100
   browser_refresh: 600
   screen_timeout: 0
   output_number: 1
-  dark_mode: true
-  ha_theme: ""
-  ha_sidebar: "none"
   rotate_display: "normal"
   map_touch_inputs: true
   keyboard_layout: us
-  cursor_timeout: 5
-
-  xorg_conf: ""
-  xorg_append_replace: "append"
-
-
   debug_mode: false
 
 schema:
@@ -94,22 +81,12 @@ schema:
   ha_url: str
   ha_dashboard: str?
   login_delay: float(0,)
-  zoom_level: int(10,1000)
   browser_refresh: int(0,)
   screen_timeout: int(0,)
   output_number: int(1,2)
-  dark_mode: bool
-  ha_theme: str?
-  ha_sidebar: list(full|narrow|none)
   rotate_display: list(normal|left|right|inverted)
   map_touch_inputs: bool
-  cursor_timeout: int
   keyboard_layout: str
-
-  xorg_conf: str?
-  xorg_append_replace: list(append|replace)
-
-
   debug_mode: bool
 
 translations:

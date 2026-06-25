@@ -1,88 +1,33 @@
 #!/usr/bin/with-contenv bashio
 # shellcheck shell=bash
-################################################################################
-# Add-on: HAOS Kiosk Display (haoskiosk)
-# File: run.sh
-# Version: 1.3.2
-# Copyright Jeff Kosowsky
-# Date: April 2026
-#
-#  Code does the following:
-#     - Import and sanity-check the following variables from HA/config.yaml
-#         HA_USERNAME
-#         HA_PASSWORD
-#         HA_URL
-#         HA_DASHBOARD
-#         LOGIN_DELAY
-#         ZOOM_LEVEL
-#         BROWSER_REFRESH
-#         SCREEN_TIMEOUT
-#         OUTPUT_NUMBER
-#         DARK_MODE
-#         HA_SIDEBAR
-#         HA_THEME
-#         ROTATE_DISPLAY
-#         MAP_TOUCH_INPUTS
-#         CURSOR_TIMEOUT
-#         KEYBOARD_LAYOUT
-#         XORG_CONF
-#         XORG_APPEND_REPLACE
-#         DEBUG_MODE
-#
-#     - Hack to delete (and later restore) /dev/tty0 (needed for X to start
-#       and to prevent udev permission errors))
-#     - Start udev
-#     - Hack to manually tag USB input devices (in /dev/input) for libinput
-#     - Start X window system
-#     - Stop console cursor blinking
-#     - Start Openbox window manager
-#     - Set up (enable/disable) screen timeouts
-#     - Rotate screen per configuration
-#     - Map touch inputs per configuration
-#     - Set keyboard layout and language
 
-#     - Launch browser for url: $HA_URL/$HA_DASHBOARD
-#       [If not in DEBUG_MODE; Otherwise, just sleep]
-#
-################################################################################
-echo "."  # Almost blank line (Note totally blank or white space lines are swallowed)
-printf '%*s\n' 80 '' | tr ' ' '#'  # Separator
 bashio::log.info "######## Starting HAOSKiosk ########"
 bashio::log.info "$(date) [Version: $ADDON_VERSION]"
 bashio::log.info "$(uname -a)"
 ha_info=$(bashio::info)
 bashio::log.info "Core=$(echo "$ha_info" | jq -r '.homeassistant')  HAOS=$(echo "$ha_info" | jq -r '.hassos')  MACHINE=$(echo "$ha_info" | jq -r '.machine')  ARCH=$(echo "$ha_info" | jq -r '.arch')"
 
-#### Clean up on exit:
-TTY0_DELETED=""  #Need to set to empty string since runs with nounset=on (like set -u)
+TTY0_DELETED=""
 cleanup() {
     local exit_code=$?
     bashio::log.info "Cleaning up and exiting..."
     jobs -p | xargs -r kill
     [ -n "$TTY0_DELETED" ] && mknod -m 620 /dev/tty0 c 4 0
-    rm -f /root/.local/share/luakit/cookies.db  # Remove cookie storage (not really necessary, but just in case...)
+    rm -f /root/.local/share/luakit/cookies.db
     exit "$exit_code"
 }
 trap cleanup HUP INT QUIT ABRT TERM EXIT
 
-################################################################################
-#### Variables
 BROWSER="luakit"
 BROWSER_FLAGS=
 
-################################################################################
-#### Get config variables from HA add-on & set environment variables
 load_config_var() {
-    # First, use existing variable if already set (for debugging purposes)
-    # If not set, lookup configuration value
-    # If null, use optional second parameter or else ""
     local VAR_NAME="$1"
     local DEFAULT="${2:-}"
     local MASK="${3:-}"
-
     local VALUE
-    #Check if $VAR_NAME exists before getting its value since 'set +x' mode
-    if declare -p "$VAR_NAME" >/dev/null 2>&1; then  #Variable exist, get its value
+
+    if declare -p "$VAR_NAME" >/dev/null 2>&1; then
         VALUE="${!VAR_NAME}"
     elif bashio::config.exists "${VAR_NAME,,}"; then
         VALUE="$(bashio::config "${VAR_NAME,,}")"
@@ -95,7 +40,6 @@ load_config_var() {
         VALUE="$DEFAULT"
     fi
 
-    # Assign and export safely using 'printf -v' and 'declare -x'
     printf -v "$VAR_NAME" '%s' "$VALUE"
     eval "export $VAR_NAME"
 
@@ -107,79 +51,33 @@ load_config_var() {
 }
 
 load_config_var HA_USERNAME
-load_config_var HA_PASSWORD "" 1  #Mask password in log
+load_config_var HA_PASSWORD "" 1
 load_config_var HA_URL "http://localhost:8123"
 load_config_var HA_DASHBOARD ""
 load_config_var LOGIN_DELAY 1.0
-load_config_var ZOOM_LEVEL 100
 load_config_var BROWSER_REFRESH 600
-load_config_var SCREEN_TIMEOUT 600  # Default to 600 seconds
-load_config_var OUTPUT_NUMBER 1  # Which *CONNECTED* Physical video output to use (Defaults to 1)
-#NOTE: By only considering *CONNECTED* output, this maximizes the chance of finding an output
-#      without any need to change configs. Set to 1, unless you have multiple video outputs connected.
-load_config_var DARK_MODE true
-load_config_var HA_THEME ""
-load_config_var HA_SIDEBAR "none"
+load_config_var SCREEN_TIMEOUT 600
+load_config_var OUTPUT_NUMBER 1
 load_config_var ROTATE_DISPLAY normal
 load_config_var MAP_TOUCH_INPUTS true
-load_config_var CURSOR_TIMEOUT 5  # Default to 5 seconds
 load_config_var KEYBOARD_LAYOUT us
-load_config_var XORG_CONF ""
-load_config_var XORG_APPEND_REPLACE append
 load_config_var DEBUG_MODE false
 
-# Validate environment variables set by config.yaml
 if [ -z "$HA_USERNAME" ] || [ -z "$HA_PASSWORD" ]; then
     bashio::log.error "Error: HA_USERNAME and HA_PASSWORD must be set"
     exit 1
 fi
 
 ################################################################################
-### GTK and DBUS-related environment variables to improve stability
-
-export NO_AT_BRIDGE=1                 # Stop GTK from touching at-spi bus
-export GTK_USE_PORTAL=0               # Disable portals
-export GIO_USE_VFS=local              # Local-only GIO
-export DBUS_SESSION_BUS_TIMEOUT=5000  # Shorten DBUS timeouts
-export GTK_CSD=0                      # Disable client side decorations (???)
-################################################################################
-#### Start Dbus
-# Start dbus-daemon to Avoids waiting for DBUS timeouts (e.g., luakit)
-# Also needed by luakit to enforce unique instance by default
-# Note do *not* use '-U' flag when calling luakit browser
-# Subsequent calls to 'luakit' exit post launch, leaving just the original process
-# Not 'userconf.lua' includes code to turn off session restore.
-# Export and save DBUS_SESSION_BUS_ADDRESS variable so that processes can communicate.
-# Note if entering through a separate shell, need to retrieve and export again
-
-DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address)
-if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
-    bashio::log.warning "WARNING: Failed to start dbus-daemon"
-fi
-bashio::log.info "DBus started with: DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
-export DBUS_SESSION_BUS_ADDRESS
-echo "$DBUS_SESSION_BUS_ADDRESS" >| /tmp/DBUS_SESSION_BUS_ADDRESS
-# Make available to subsequent shells
-echo "export DBUS_SESSION_BUS_ADDRESS='$DBUS_SESSION_BUS_ADDRESS'" >> "$HOME/.profile"
-
-#### Hack to get writable /dev/tty0 for X
-# Note first need to delete /dev/tty0 since X won't start if it is there,
-# because X doesn't have permissions to access it in the container
-# Also, prevents udev permission error warnings & issues
-# Note that remounting rw is not sufficient
-
-# First, remount /dev as read-write since X absolutely, must have /dev/tty access
-# Note: need to use the version of 'mount' in util-linux, not busybox
-# Note: Do *not* later remount as 'ro' since that affect the root fs and
-#       in particular will block HAOS updates
+# Hack to get writable /dev/tty0 for X
 if [ -e "/dev/tty0" ]; then
-    bashio::log.info "Attempting to remount /dev as 'rw' so we can (temporarily) delete /dev/tty0..."
+    bashio::log.info "Remounting /dev as rw to delete /dev/tty0..."
     mount -o remount,rw /dev
     if ! mount -o remount,rw /dev ; then
         bashio::log.error "Failed to remount /dev as read-write..."
         exit 1
     fi
-    if  ! rm -f /dev/tty0 ; then
+    if ! rm -f /dev/tty0 ; then
         bashio::log.error "Failed to delete /dev/tty0..."
         exit 1
     fi
@@ -187,86 +85,46 @@ if [ -e "/dev/tty0" ]; then
     bashio::log.info "Deleted /dev/tty0 successfully..."
 fi
 
-#### Start udev (used by X)
-bashio::log.info "Starting 'udevd' and (re-)triggering..."
+################################################################################
+# Start udev
+bashio::log.info "Starting udevd..."
 if ! udevd --daemon || ! udevadm trigger; then
-    bashio::log.warning "WARNING: Failed to start udevd or trigger udev, input devices may not work"
+    bashio::log.warning "WARNING: Failed to start udevd, input devices may not work"
 fi
-udevadm settle --timeout=10  #Wait for udev event processing to complete
+udevadm settle --timeout=10
 
-# Force tagging of event input devices (in /dev/input) to enable recognition by
-# libinput since 'udev' doesn't necessarily trigger their tagging when run from a container.
-echo "/dev/input event devices:"
+# Force tag event input devices for libinput
 mapfile -t devices < <(find /dev/input/event* -type c 2>/dev/null | sort -V)
 if [ ${#devices[@]} -eq 0 ]; then
-    bashio::log.warning "WARNING: No character input event devices found"
+    bashio::log.warning "WARNING: No input event devices found"
 else
     for dev in "${devices[@]}"; do
         devpath=""
-        for _ in {1..25}; do  # Retry and give time to settle if not successful initially
+        for _ in {1..25}; do
             if devpath=$(udevadm info --query=path --name="$dev" 2>/dev/null); then
                 break
             fi
             sleep 0.2
         done
-        if [ -z "$devpath" ]; then
-            echo "  $dev: Failed to get device path"
-            continue
-        fi
-        echo "  $dev: $devpath"
-
-        # Simulate a udev event to trigger (re)load of all properties
-        udevadm test "$devpath" >/dev/null 2>&1 || echo "$dev: No valid udev rule found..."
+        [ -z "$devpath" ] && continue
+        udevadm test "$devpath" >/dev/null 2>&1 || true
     done
 fi
-udevadm settle --timeout=10  #Wait for udev event processing to complete
+udevadm settle --timeout=10
 
-# Show discovered libinput devices
-echo "libinput list-devices found:"
-libinput list-devices 2>/dev/null | awk '
-  BEGIN { OFS="\t" }
-
-  function print_device() {
-    if (devname != "")
-      print  "  "(event ? event : ""), (type ? type : ""), devname
-      devname = ""
-      event = ""
-      type = ""
-  }
-
-  /^Device:/ {
-    print_device()  # Print previous device (if exists)
-    devname = substr($0, index($0, $2))
-    gsub(/^[ \t]+|[ \t]+$/, "", devname)  # Trim device name
-  }
-
-  /^Kernel:/ {
-    split($2, a, "/")
-    event = a[length(a)]
-    gsub(/^[ \t]+|[ \t]+$/, "", event)    # Trim event (unlikely, but safe)
-  }
-
-  /^Capabilities:/ {
-    type = substr($0, index($0, $2))
-    gsub(/^[ \t]+|[ \t]+$/, "", type)      # Trim capabilities (i.e., device type)
-  }
-  END { print_device() }  # Print last device
-' | sort -V | column -t -s $'\t'
-
-## Determine main display card
+################################################################################
+# Determine main display card
 bashio::log.info "DRM video cards:"
 find /dev/dri/ -maxdepth 1 -type c -name 'card[0-9]*' 2>/dev/null | sed 's/^/  /'
-bashio::log.info "DRM video card driver and connection status:"
 selected_card=""
 for status_path in /sys/class/drm/card[0-9]*-*/status; do
-    [ -e "$status_path" ] || continue  # Skip if status file doesn't exist
-
+    [ -e "$status_path" ] || continue
     status=$(cat "$status_path")
     card_port=$(basename "$(dirname "$status_path")")
     card=${card_port%%-*}
     driver=$(basename "$(readlink "/sys/class/drm/$card/device/driver")")
-    if [ -z "$selected_card" ]  && [ "$status" = "connected" ]; then
-        selected_card="$card"  # Select first connected card
+    if [ -z "$selected_card" ] && [ "$status" = "connected" ]; then
+        selected_card="$card"
         printf "  *"
     else
         printf "   "
@@ -274,41 +132,18 @@ for status_path in /sys/class/drm/card[0-9]*-*/status; do
     printf "%-25s%-20s%s\n" "$card_port" "$driver" "$status"
 done
 if [ -z "$selected_card" ]; then
-    bashio::log.info "ERROR: No connected video card detected. Exiting.."
+    bashio::log.error "ERROR: No connected video card detected. Exiting..."
     exit 1
 fi
 
-#### Start Xorg in the background
-rm -rf /tmp/.X*-lock  #Cleanup old versions
+rm -rf /tmp/.X*-lock
 
-# Modify 'xorg.conf' as appropriate
-if [[ -n "$XORG_CONF" && "${XORG_APPEND_REPLACE}" = "replace" ]]; then
-    bashio::log.info "Replacing default 'xorg.conf'..."
-    echo "${XORG_CONF}" >| /etc/X11/xorg.conf
-else
-    cp -a /etc/X11/xorg.conf{.default,}
-    #Add "kmsdev" line to Device Section based on 'selected_card'
-    sed -i "/Option[[:space:]]\+\"DRI\"[[:space:]]\+\"3\"/a\    Option     \t\t\"kmsdev\" \"/dev/dri/$selected_card\"" /etc/X11/xorg.conf
-
-    if [ -z "$XORG_CONF" ]; then
-        bashio::log.info "No user 'xorg.conf' data provided, using default..."
-    elif [ "${XORG_APPEND_REPLACE}" = "append" ]; then
-        bashio::log.info "Appending onto default 'xorg.conf'..."
-        echo -e "\n#\n${XORG_CONF}" >> /etc/X11/xorg.conf
-    fi
-fi
-
-# Print out current 'xorg.conf'
-echo "."  #Almost blank line (Note totally blank or white space lines are swallowed)
-printf '%*s xorg.conf %*s\n' 35 '' 34 '' | tr ' ' '#'  #Header
-cat /etc/X11/xorg.conf
-printf '%*s\n' 80 '' | tr ' ' '#'  #Trailer
-echo "."
+# Build xorg.conf: copy default then add kmsdev for selected card
+cp -a /etc/X11/xorg.conf{.default,}
+sed -i "/Option[[:space:]]\+\"DRI\"[[:space:]]\+\"3\"/a\    Option     \t\t\"kmsdev\" \"/dev/dri/$selected_card\"" /etc/X11/xorg.conf
 
 bashio::log.info "Starting X on DISPLAY=$DISPLAY..."
-NOCURSOR=""
-[ "$CURSOR_TIMEOUT" -lt 0 ] && NOCURSOR="-nocursor"  #No cursor if <0
-Xorg $NOCURSOR </dev/null 2>&1 | grep -v "Could not resolve keysym XF86\|Errors from xkbcomp are not fatal\|XKEYBOARD keymap compiler (xkbcomp) reports" &
+Xorg -nocursor </dev/null 2>&1 | grep -v "Could not resolve keysym XF86\|Errors from xkbcomp are not fatal\|XKEYBOARD keymap compiler (xkbcomp) reports" &
 
 XSTARTUP=30
 for ((i=0; i<=XSTARTUP; i++)); do
@@ -320,11 +155,7 @@ done
 
 # Restore /dev/tty0
 if [ -n "$TTY0_DELETED" ]; then
-    if mknod -m 620 /dev/tty0 c 4 0; then
-        bashio::log.info "Restored /dev/tty0 successfully..."
-    else
-        bashio::log.error "Failed to restore /dev/tty0..."
-    fi
+    mknod -m 620 /dev/tty0 c 4 0 2>/dev/null || true
 fi
 
 if ! xset q >/dev/null 2>&1; then
@@ -333,75 +164,12 @@ if ! xset q >/dev/null 2>&1; then
 fi
 bashio::log.info "X server started successfully after $i seconds..."
 
-# List xinput devices
-echo "xinput list:"
-xinput list | sed 's/^/  /'
-
-#Stop console blinking cursor (this projects through the X-screen)
+# Stop console blinking cursor
 echo -e "\033[?25l" > /dev/console
 
-#Hide cursor dynamically after CURSOR_TIMEOUT seconds if positive
-if [ "$CURSOR_TIMEOUT" -gt 0 ]; then
-    unclutter-xfixes --start-hidden --hide-on-touch --fork --timeout "$CURSOR_TIMEOUT"
-fi
-
-#### Start Window manager in the background
-WINMGR=Openbox  #Openbox window manager
-## Change key bindings
-mkdir -p ~/.config/openbox
-RC_XML=~/.config/openbox/rc.xml
-cp -a /etc/xdg/openbox/rc.xml "$RC_XML"
-# Delete selected old key bindings
-awk 'BEGIN{skip=0} /<keybind key="(C-A-Left|C-A-Right)">/{skip=1} /<\/keybind>/ && skip{skip=0; next} !skip{print}' "$RC_XML" > /tmp/rc.new.xml
-mv /tmp/rc.new.xml "$RC_XML"
-
-# Add new key bindings
-cat <<'EOF' > /tmp/new_keybinds.xml
-  <!-- Next window: Ctrl+Alt+Shift+Right -->
-  <keybind key="C-A-S-Right">
-    <action name="NextWindow">
-      <finalactions>
-        <action name="Focus"/>
-        <action name="Raise"/>
-        <action name="Unshade"/>
-      </finalactions>
-    </action>
-  </keybind>
-
-  <!-- Previous window: Ctrl+Alt+Shift+Left -->
-  <keybind key="C-A-S-Left">
-    <action name="PreviousWindow">
-      <finalactions>
-        <action name="Focus"/>
-        <action name="Raise"/>
-        <action name="Unshade"/>
-      </finalactions>
-    </action>
-  </keybind>
-
-EOF
-awk -v f=/tmp/new_keybinds.xml '/<\/keyboard>/ { system("cat " f) } { print }' \
-    "$RC_XML" > /tmp/rc.new.xml
-mv /tmp/rc.new.xml "$RC_XML"
-rm /tmp/new_keybinds.xml
-
-# Start openbox
-openbox &
-
-#WINMGR=xfwm4  #Alternately using xfwm4
-#xfsettingsd &
-#startxfce4 &
-
-O_PID=$!
-sleep 0.5  #Ensure window manager starts
-if ! kill -0 "$O_PID" 2>/dev/null; then  #Checks if process alive
-    bashio::log.error "Failed to start $WINMGR window  manager"
-    exit 1
-fi
-bashio::log.info "$WINMGR window manager started successfully..."
-
-#### Configure screen timeout (Note: DPMS needs to be enabled/disabled *after* starting window manager)
-xset +dpms  #Turn on DPMS
+################################################################################
+# Configure screen timeout
+xset +dpms
 xset s "$SCREEN_TIMEOUT"
 xset dpms "$SCREEN_TIMEOUT" "$SCREEN_TIMEOUT" "$SCREEN_TIMEOUT"
 if [ "$SCREEN_TIMEOUT" -eq 0 ]; then
@@ -410,95 +178,75 @@ else
     bashio::log.info "Screen timeout after $SCREEN_TIMEOUT seconds..."
 fi
 
-#### Activate (+/- rotate) desired physical output number
-# Detect connected physical outputs
-
-readarray -t ALL_OUTPUTS < <(xrandr --query | awk '/^[[:space:]]*[A-Za-z0-9-]+/ {print $1}')
-bashio::log.info "All video outputs: ${ALL_OUTPUTS[*]}"
-
-readarray -t OUTPUTS < <(xrandr --query | awk '/ connected/ {print $1}')  # Read in array of outputs
+################################################################################
+# Detect and configure outputs
+readarray -t OUTPUTS < <(xrandr --query | awk '/ connected/ {print $1}')
 if [ ${#OUTPUTS[@]} -eq 0 ]; then
-    bashio::log.info "ERROR: No connected outputs detected. Exiting.."
+    bashio::log.error "ERROR: No connected outputs detected. Exiting..."
     exit 1
 fi
 
-# Select the N'th connected output (fallback to last output if N exceeds actual number of outputs)
 if [ "$OUTPUT_NUMBER" -gt "${#OUTPUTS[@]}" ]; then
-    OUTPUT_NUMBER=${#OUTPUTS[@]}  # Use last output
+    OUTPUT_NUMBER=${#OUTPUTS[@]}
 fi
-bashio::log.info "Connected video outputs: (Selected output marked with '*')"
+
 for i in "${!OUTPUTS[@]}"; do
     marker=" "
     [ "$i" -eq "$((OUTPUT_NUMBER - 1))" ] && marker="*"
     bashio::log.info "  ${marker}[$((i + 1))] ${OUTPUTS[$i]}"
 done
-OUTPUT_NAME="${OUTPUTS[$((OUTPUT_NUMBER - 1))]}"  #Subtract 1 since zero-based
+OUTPUT_NAME="${OUTPUTS[$((OUTPUT_NUMBER - 1))]}"
 
-# Configure the selected output and disable others
 for OUTPUT in "${OUTPUTS[@]}"; do
-    if [ "$OUTPUT" = "$OUTPUT_NAME" ]; then  #Activate
+    if [ "$OUTPUT" = "$OUTPUT_NAME" ]; then
         if [ "$ROTATE_DISPLAY" = normal ]; then
             xrandr --output "$OUTPUT_NAME" --primary --auto
         else
             xrandr --output "$OUTPUT_NAME" --primary --rotate "${ROTATE_DISPLAY}"
             bashio::log.info "Rotating $OUTPUT_NAME: ${ROTATE_DISPLAY}"
         fi
-    else  # Set as inactive output
+    else
         xrandr --output "$OUTPUT" --off
     fi
 done
 
-if [ "$MAP_TOUCH_INPUTS" = true ]; then  #Map touch devices to physical output
-    while IFS= read -r id; do  #Loop through all xinput devices
+# Map touch inputs
+if [ "$MAP_TOUCH_INPUTS" = true ]; then
+    while IFS= read -r id; do
         name=$(xinput list --name-only "$id" 2>/dev/null)
-        [[ "${name,,}" =~ (^|[^[:alnum:]_])(touch|touchscreen|stylus)([^[:alnum:]_]|$) ]] || continue  #Not touch-like input
+        [[ "${name,,}" =~ (^|[^[:alnum:]_])(touch|touchscreen|stylus)([^[:alnum:]_]|$) ]] || continue
         xinput_line=$(xinput list "$id" 2>/dev/null)
         [[ "$xinput_line" =~ \[(slave|master)[[:space:]]+keyboard[[:space:]]+\([0-9]+\)\] ]] && continue
         props="$(xinput list-props "$id" 2>/dev/null)"
-        [[ "$props" = *"Coordinate Transformation Matrix"* ]] ||  continue  #No transformation matrix
+        [[ "$props" = *"Coordinate Transformation Matrix"* ]] || continue
         xinput map-to-output "$id" "$OUTPUT_NAME" && RESULT="SUCCESS" || RESULT="FAILED"
-        bashio::log.info "Mapping: input device [$id|$name] -->  $OUTPUT_NAME [$RESULT]"
-
+        bashio::log.info "Mapping: input device [$id|$name] --> $OUTPUT_NAME [$RESULT]"
     done < <(xinput list --id-only | sort -n)
 fi
 
-#### Set keyboard layout
+# Set keyboard layout
 setxkbmap "$KEYBOARD_LAYOUT"
 export LANG=$KEYBOARD_LAYOUT
-bashio::log.info "Setting keyboard layout and language to: $KEYBOARD_LAYOUT"
-setxkbmap -query  | sed 's/^/  /'  #Log layout
+bashio::log.info "Setting keyboard layout to: $KEYBOARD_LAYOUT"
 
-### Get screen width & height for selected output
-read -r SCREEN_WIDTH SCREEN_HEIGHT < <(
-    xrandr --query --current | grep "^$OUTPUT_NAME " |
-    sed -n "s/^$OUTPUT_NAME connected.* \([0-9]\+\)x\([0-9]\+\)+.*$/\1 \2/p"
-)
-
-if [[ -n "$SCREEN_WIDTH" && -n "$SCREEN_HEIGHT" ]]; then
-    bashio::log.info "Screen: Width=$SCREEN_WIDTH  Height=$SCREEN_HEIGHT"
-else
-    bashio::log.error "Could not determine screen size for output $OUTPUT_NAME"
-fi
-
-#### Start browser (or debug mode)  and wait/sleep
+################################################################################
+# Launch browser (or debug mode)
 if [ "$DEBUG_MODE" != true ]; then
-    ### Run browser in the background and wait for process to exit
     $BROWSER ${BROWSER_FLAGS:+$BROWSER_FLAGS} "$HA_URL/$HA_DASHBOARD" &
-    bashio::log.info "Launching $BROWSER browser(PID=$!): $HA_URL/$HA_DASHBOARD"
+    bashio::log.info "Launching $BROWSER (PID=$!): $HA_URL/$HA_DASHBOARD"
 
     count=0
-    while true; do  # Wait for all browser processes to exit
+    while true; do
         if pgrep -f -- "^$BROWSER " > /dev/null 2>&1; then
             count=0
         else
             count=$((count + 1))
         fi
-        [ $count -ge 3 ] && break # Exit if no browser process for at least 2*5=10 seconds
+        [ $count -ge 3 ] && break
         sleep 5
     done
-    bashio::log.info "No $BROWSER instances remaining... exiting 'run.sh'..."
-
-else  ### Debug mode
-    bashio::log.info "Entering debug mode (X & $WINMGR window manager but no $BROWSER browser)..."
+    bashio::log.info "No $BROWSER instances remaining... exiting..."
+else
+    bashio::log.info "Debug mode: X running but no browser launched."
     exec sleep infinite
 fi

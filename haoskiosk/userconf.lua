@@ -157,11 +157,6 @@ session.restore = function()
     return nil
 end
 
--- Force new URLs from new 'luakit' instances to launch in current/last active tab of first window
--- Note requires patch to /usr/share/luakit/lib/unique_instance.lua
-local unique_instance = require "unique_instance"
-unique_instance.open_link_in_current_tab  = true
-
 -- -----------------------------------------------------------------------
 -- Helper functions
 local function single_quote_escape(str) -- Single quote strings before injection into JS
