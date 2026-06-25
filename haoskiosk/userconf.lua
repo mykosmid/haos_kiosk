@@ -129,10 +129,8 @@ if browser_refresh < 0 then
     browser_refresh = defaults.BROWSER_REFRESH
 end
 
-local onscreen_keyboard = os.getenv("ONSCREEN_KEYBOARD") == "true"
-
-msg.info("USERNAME=%s; URL=%s; DARK_MODE=%s; SIDEBAR=%s; THEME=%s; LOGIN_DELAY=%.1f, ZOOM_LEVEL=%d, BROWSER_REFRESH=%d,  ONSCREEN_KEYBOARD=%s",
-    username, ha_url, tostring(dark_mode), sidebar, theme, login_delay, zoom_level, browser_refresh, tostring(onscreen_keyboard))
+msg.info("USERNAME=%s; URL=%s; DARK_MODE=%s; SIDEBAR=%s; THEME=%s; LOGIN_DELAY=%.1f, ZOOM_LEVEL=%d, BROWSER_REFRESH=%d",
+    username, ha_url, tostring(dark_mode), sidebar, theme, login_delay, zoom_level, browser_refresh)
 
 -- -----------------------------------------------------------------------
 -- Forward console messages to stdout
@@ -230,13 +228,6 @@ webview.add_signal("init", function(view)
             end
         end
         msg.info("URL: %s (RSS: %s MB)", v.uri, rss_mb) -- DEBUG
-
-        -- Hide onscreen keyboard (if enabled) after page (re)load
-        -- NOTE: this is needed since 'onboard' doesn't always hide keyboard unless focus explicitly lost
-        if onscreen_keyboard then
-            msg.info("Hiding onscreen keyboard...")
-            luakit.spawn("dbus-send --type=method_call --dest=org.onboard.Onboard /org/onboard/Onboard/Keyboard org.onboard.Onboard.Keyboard.Hide")
-        end
 
         -- Force passthrough mode on every page load so don't inadvertently type commands in kiosk
         webview.window(v):set_mode("passthrough")

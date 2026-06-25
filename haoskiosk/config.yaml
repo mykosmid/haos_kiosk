@@ -82,27 +82,11 @@ options:
   map_touch_inputs: true
   keyboard_layout: us
   cursor_timeout: 5
-  onscreen_keyboard: true
-  save_onscreen_config: true
+
   xorg_conf: ""
   xorg_append_replace: "append"
-  audio_sink: "auto"
-  rest_ip: "127.0.0.1"
-  rest_port: 8080
-  rest_bearer_token: ""
-  gestures:
-    - '"1_ANY_1_CORNER_TOPRIGHT": {"cmds": "kiosk.toggle_keyboard", "msg": "Toggling Onboard keyboard..."}'
-    - '"[Left]_MOUSE_3_CLICK": {"cmds": "kiosk.toggle_keyboard", "msg": "Toggling Onboard keyboard..."}'
-    - '"3_TOUCH_1_TAP": {"cmds": "kiosk.toggle_keyboard", "msg": "Toggling Onboard keyboard..."}'
-    - '"3_TOUCH_2_TAP": {"cmds": "kiosk.refresh_browser", "msg": "Refresh Browser"}'
-    - '"3_TOUCH_3_TAP": {"cmds": "kiosk.toggle_audio", "msg": "Toggle audio mute"}'
-    - '"3_TOUCH_4_TAP": {"cmds": "kiosk.screenshot", "msg": "Save screenshot"}'
-    - '"3+_TOUCH_1_SWIPE_LEFT": {"cmds": "kiosk.forward", "msg": "Go forward in the history browser"}'
-    - '"3+_TOUCH_1_SWIPE_RIGHT": {"cmds": "kiosk.back", "msg": "Go back in the history browser"}'
-    - '"2_TOUCH_3_TAP": {"cmds": "kiosk.launch_url", "msg": "Restore default dashboard: HA_URL/HA_DASHBOARD"}'
-    - '"2_TOUCH_4_TAP": {"cmds": [["kiosk.launch_url", "www.google.com"]], "msg": "Open Google search"}'
-  command_whitelist: "cat|date|dbus-send|echo|false|grep|head|ls|luakit|notify-send|ping|ping6|ps|pstree|sleep|tail|test|top|tree|true|xdotool|xset"
-  vnc_server: ""
+
+
   debug_mode: false
 
 schema:
@@ -122,18 +106,11 @@ schema:
   map_touch_inputs: bool
   cursor_timeout: int
   keyboard_layout: str
-  onscreen_keyboard: bool
-  save_onscreen_config: bool
+
   xorg_conf: str?
   xorg_append_replace: list(append|replace)
-  audio_sink: list(auto|hdmi|usb|none)
-  rest_ip: str
-  rest_port: int(1024,49151)
-  rest_bearer_token: password
-  gestures:
-    - str
-  command_whitelist: str
-  vnc_server: password
+
+
   debug_mode: bool
 
 translations:

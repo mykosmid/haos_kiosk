@@ -72,13 +72,7 @@ configuration:
   keyboard_layout:
     name: "Keyboard Layout"
     description: "Set the keyboard layout and language [Default: us]"
-  onscreen_keyboard:
-    name: "Onscreen Keyboard"
-    description: "Display an Onscreen Keyboard for text input [Default: True]"
-  save_onscreen_config:
-    name: "Save Onscreen Config"
-    description: |
-      Save and Restore changes to Onscreen keyboard settings [Default: True]
+
   xorg_conf:
     name: "xorg.conf file"
     description: |
@@ -91,44 +85,10 @@ configuration:
     items:
       append: "Append"
       replace: "Replace"
-  audio_sink:
-    name: "Audio Sink"
-    description: "Audio output sink [Default: Auto]"
-    items:
-      auto: "Auto"
-      hdmi: "HDMI"
-      usb: "USB"
-      none: "None"
-  rest_ip:
-    name: "REST IP address"
-    description: |
-      Listening IP address for REST API server [Default: `127.0.0.1`]
-      CAUTION: Set to `0.0.0.0` to listen from anywhere BUT SECURITY RISK.
-  rest_port:
-    name: "REST Port"
-    description: |
-      Listening port for REST API server (1024-49151) [Default: 8080]
-  rest_authorization_token:
-    name: "REST Authorization Token"
-    description: |
-      Optional authorization token for REST API. [Default: ""]
-      If set add the line `-H "Authorization: Bearer <REST_BEARER_TOKEN>"`
-      to your REST API calls.
-  gestures:
-    name: Gesture Command List
-    description: |
-      Add JSON-like gesture string key and gesture command value pairs. See
-      README for formatting Earlier keys take precedence over later keys
-  command_whitelist:
-    name: "Command Whitelist Regex"
-    description: |
-      Regex of runnable user commands for the REST API and for use in
-      gesture commands. See README for details
-  vnc_server:
-    name: "VNC Server Password"
-    description: |
-      Launch VNC Server on port 5900 if password non-blank. If password
-      set to '-', then don't require any password. *Use with caution*
+
+
+
+
   debug_mode:
     name: "Debug Mode"
     description: |

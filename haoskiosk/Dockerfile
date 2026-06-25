@@ -23,7 +23,6 @@ RUN apk update && apk add --no-cache \
      mesa-gles \
      libdrm \
 ### X utils
-     xdotool \
      xinput \
      xrandr \
      xset \
@@ -36,32 +35,28 @@ RUN apk update && apk add --no-cache \
 #     libinput-tools \
      udev \
      libinput-udev \
-     libevdev \
-     evtest \
+
 ### Window, mouse, keyboard management
      openbox \
-     onboard \
+
      unclutter-xfixes \
      ttf-dejavu \
 ### Linux utils
      bash \
      util-linux \
      patch \
-     scrot \
+
 ### Full Timezone info
      icu-data-full \
 ### Python libraries
 #    py3-pip \
-    py3-aiohttp \
-    py3-xlib \
+
 ### Sound
-     pulseaudio-utils \
+
 #     alsa-utils alsa-plugins-pulse \
 ### Video
 #     gstreamer-tools \
 #     gst-libav \
-### VNC (for debugging) - run: x11vnc -display :0 -forever & \
-      x11vnc \
 # Browser
 #    luakit \
    && apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.21/community luakit=2.3.6-r0 \
@@ -80,8 +75,7 @@ COPY translations/*.yaml /translations/
 COPY run.sh /
 RUN chmod a+x /run.sh
 
-COPY mouse_touch_inputs.py gesture_commands.json /
-COPY rest_server.py /
+
 
 #### Patches
 # Need to patch 'unique_instance.lua' so that new instance urls overwrite active url rather than add new tab

@@ -25,16 +25,8 @@
 #         MAP_TOUCH_INPUTS
 #         CURSOR_TIMEOUT
 #         KEYBOARD_LAYOUT
-#         ONSCREEN_KEYBOARD
-#         SAVE_ONSCREEN_CONFIG
 #         XORG_CONF
 #         XORG_APPEND_REPLACE
-#         AUDIO_SINK
-#         REST_PORT
-#         REST_IP
-#         REST_BEARER_TOKEN
-#         COMMAND_WHITELIST
-#         VNC_SERVER
 #         DEBUG_MODE
 #
 #     - Hack to delete (and later restore) /dev/tty0 (needed for X to start
@@ -48,10 +40,7 @@
 #     - Rotate screen per configuration
 #     - Map touch inputs per configuration
 #     - Set keyboard layout and language
-#     - Set up onscreen keyboard per configuration
-#     - Set audio sink
-#     - Start Xinput parsing...
-#     - Start REST API server
+
 #     - Launch browser for url: $HA_URL/$HA_DASHBOARD
 #       [If not in DEBUG_MODE; Otherwise, just sleep]
 #
@@ -66,13 +55,9 @@ bashio::log.info "Core=$(echo "$ha_info" | jq -r '.homeassistant')  HAOS=$(echo 
 
 #### Clean up on exit:
 TTY0_DELETED=""  #Need to set to empty string since runs with nounset=on (like set -u)
-ONBOARD_CONFIG_FILE="/config/onboard-settings.dconf"
 cleanup() {
     local exit_code=$?
     bashio::log.info "Cleaning up and exiting..."
-    if [ "$SAVE_ONSCREEN_CONFIG" = true ]; then
-        dconf dump /org/onboard/ > "$ONBOARD_CONFIG_FILE"
-    fi
     jobs -p | xargs -r kill
     [ -n "$TTY0_DELETED" ] && mknod -m 620 /dev/tty0 c 4 0
     rm -f /root/.local/share/luakit/cookies.db  # Remove cookie storage (not really necessary, but just in case...)
@@ -139,17 +124,9 @@ load_config_var ROTATE_DISPLAY normal
 load_config_var MAP_TOUCH_INPUTS true
 load_config_var CURSOR_TIMEOUT 5  # Default to 5 seconds
 load_config_var KEYBOARD_LAYOUT us
-load_config_var ONSCREEN_KEYBOARD false
-load_config_var SAVE_ONSCREEN_CONFIG true
 load_config_var XORG_CONF ""
 load_config_var XORG_APPEND_REPLACE append
-load_config_var AUDIO_SINK auto
-load_config_var REST_PORT 8080
-load_config_var REST_IP "127.0.0.1"
-load_config_var REST_BEARER_TOKEN "" 1  # Mask token in log
-load_config_var COMMAND_WHITELIST "^$"  # Default is no commands allowed
 load_config_var DEBUG_MODE false
-load_config_var VNC_SERVER ""  1 #Mask password in log
 
 # Validate environment variables set by config.yaml
 if [ -z "$HA_USERNAME" ] || [ -z "$HA_PASSWORD" ]; then
@@ -380,20 +357,6 @@ mv /tmp/rc.new.xml "$RC_XML"
 
 # Add new key bindings
 cat <<'EOF' > /tmp/new_keybinds.xml
-  <!-- Toggle Onboard onscreen keyboard: Ctrl+Alt+o -->
-  <keybind key="C-A-o">
-    <action name="Execute">
-      <command>dbus-send --type=method_call --dest=org.onboard.Onboard /org/onboard/Onboard/Keyboard org.onboard.Onboard.Keyboard.ToggleVisible</command>
-    </action>
-  </keybind>
-
-  <!-- Take screenshot: Ctrl+Alt+k -->
-  <keybind key="C-A-k">
-    <action name="Execute">
-      <command>sh -c 'scrot /media/screenshots/haoskiosk-$(date +"%Y%m%d_%H%M%S").jpg -q 90'</command>
-    </action>
-  </keybind>
-
   <!-- Next window: Ctrl+Alt+Shift+Right -->
   <keybind key="C-A-S-Right">
     <action name="NextWindow">
@@ -515,153 +478,6 @@ if [[ -n "$SCREEN_WIDTH" && -n "$SCREEN_HEIGHT" ]]; then
     bashio::log.info "Screen: Width=$SCREEN_WIDTH  Height=$SCREEN_HEIGHT"
 else
     bashio::log.error "Could not determine screen size for output $OUTPUT_NAME"
-fi
-
-#### Launch Onboard onscreen keyboard per configuration
-if [[ "$ONSCREEN_KEYBOARD" = true && -n "$SCREEN_WIDTH" && -n "$SCREEN_HEIGHT" ]]; then
-    ### Define min/max dimensions for orientation-agnostic calculation
-    if (( SCREEN_WIDTH >= SCREEN_HEIGHT )); then  #Landscape
-        MAX_DIM=$SCREEN_WIDTH
-        MIN_DIM=$SCREEN_HEIGHT
-        ORIENTATION="landscape"
-    else  #Portrait
-        MAX_DIM=$SCREEN_HEIGHT
-        MIN_DIM=$SCREEN_WIDTH
-        ORIENTATION="portrait"
-    fi
-
-    KBD_ASPECT_RATIO_X10=30  # Ratio of keyboard width to keyboard height times 10 (must be integer)
-    # So that 30 is 3:1 (Note use times 10 since want to use integer arithmetic)
-
-    ### Default keyboard geometry for landscape (full-width, bottom half of screen)
-    LAND_HEIGHT=$(( MIN_DIM / 3 ))
-    LAND_WIDTH=$(( (LAND_HEIGHT * KBD_ASPECT_RATIO_X10) / 10 ))
-    [ $LAND_WIDTH -gt "$MAX_DIM" ] && LAND_WIDTH=$MAX_DIM
-    LAND_Y_OFFSET=$(( MIN_DIM - LAND_HEIGHT ))
-    LAND_X_OFFSET=$(( (MAX_DIM - LAND_WIDTH) / 2 ))  # Centered
-
-    ### Default keyboard geometry for portrait (full-width, bottom 1/4 of screen)
-    PORT_HEIGHT=$(( MAX_DIM / 4 ))
-    PORT_WIDTH=$(( (PORT_HEIGHT * KBD_ASPECT_RATIO_X10) / 10 ))
-    [ $PORT_WIDTH -gt "$MIN_DIM" ] && PORT_WIDTH=$MIN_DIM
-    PORT_Y_OFFSET=$(( MAX_DIM - PORT_HEIGHT ))
-    PORT_X_OFFSET=$(( (MIN_DIM - PORT_WIDTH) / 2 ))  # Centered
-
-    ### Apply default settings and geometry
-    # Global appearance settings
-    dconf write /org/onboard/layout "'/usr/share/onboard/layouts/Small.onboard'"
-    dconf write /org/onboard/theme "'/usr/share/onboard/themes/Blackboard.theme'"
-    dconf write /org/onboard/theme-settings/color-scheme "'/usr/share/onboard/themes/Charcoal.colors'"
-    dconf write /org/onboard/keyboard/show-click-buttons true  # Show buttons on keyboard for left/middle/right click & drag
-
-    # Behavior settings
-    dconf write /org/onboard/auto-show/enabled true  # Auto-show
-    dconf write /org/onboard/auto-show/tablet-mode-detection-enabled false  # Show keyboard only in tablet mode
-    dconf write /org/onboard/window/force-to-top true  # Always on top
-    gsettings set org.gnome.desktop.interface toolkit-accessibility true  # Disable gnome accessibility popup
-
-    # Default landscape geometry
-    dconf write /org/onboard/window/landscape/height "$LAND_HEIGHT"
-    dconf write /org/onboard/window/landscape/width "$LAND_WIDTH"
-    dconf write /org/onboard/window/landscape/x "$LAND_X_OFFSET"
-    dconf write /org/onboard/window/landscape/y "$LAND_Y_OFFSET"
-
-    # Default portrait geometry
-    dconf write /org/onboard/window/portrait/height "$PORT_HEIGHT"
-    dconf write /org/onboard/window/portrait/width "$PORT_WIDTH"
-    dconf write /org/onboard/window/portrait/x "$PORT_X_OFFSET"
-    dconf write /org/onboard/window/portrait/y "$PORT_Y_OFFSET"
-
-    ### Restore or delete saved  user configuration
-    if [ -f "$ONBOARD_CONFIG_FILE" ]; then
-        if [ "$SAVE_ONSCREEN_CONFIG" = true ]; then
-            bashio::log.info "Restoring Onboard configuration from '$ONBOARD_CONFIG_FILE'"
-            dconf load /org/onboard/ < "$ONBOARD_CONFIG_FILE"
-        else  #Otherwise delete config file (if it exists)
-            rm -f "$ONBOARD_CONFIG_FILE"
-        fi
-    fi
-
-    LOG_MSG=$(
-        echo "Onboard keyboard initialized for: $OUTPUT_NAME (${SCREEN_WIDTH}x${SCREEN_HEIGHT}) [$ORIENTATION]"
-        echo "  Appearance: Layout=$(dconf read /org/onboard/layout)  Theme=$(dconf read /org/onboard/theme)  Color-Scheme=$(dconf read /org/onboard/theme-settings/color-scheme)"
-        echo "  Behavior: Auto-Show=$(dconf read /org/onboard/auto-show/enabled)  Tablet-Mode=$(dconf read /org/onboard/auto-show/tablet-mode-detection-enabled)  Force-to-Top=$(dconf read /org/onboard/window/force-to-top)"
-        echo "  Geometry: Height=$(dconf read /org/onboard/window/${ORIENTATION}/height)  Width=$(dconf read /org/onboard/window/${ORIENTATION}/width)  X-Offset=$(dconf read /org/onboard/window/${ORIENTATION}/x)  Y-Offset=$(dconf read /org/onboard/window/${ORIENTATION}/y)"
-    )
-    bashio::log.info "$LOG_MSG"
-
-    ### Launch 'Onboard' keyboard
-    bashio::log.info "Starting Onboard onscreen keyboard"
-    onboard &
-fi
-
-### Set Audio sink
-case "$AUDIO_SINK" in
-    hdmi)  # Pick first HDMI sink
-        sink=$(pactl list short sinks | awk '/hdmi/ {print $2; exit}')
-        ;;
-    usb)  # Pick first USB or analog sink
-        sink=$(pactl list short sinks | awk '/usb|analog/ {print $2; exit}')
-        ;;
-    none) # Set to null sink (creating one if none exists yet
-        if ! pactl list short sinks | awk '{print $2}' | grep -qx "null"; then
-            pactl load-module module-null-sink sink_name=null sink_properties=device.description=Null >/dev/null
-        fi
-        sink=null
-        ;;
-    *)  # Pick existing default or the first available sink if not set
-        sink=$(pactl info | awk -F': ' '/Default Sink/ {print $2}')
-        if [ -z "$sink" ]; then
-            sink=$(pactl list short sinks | awk '{print $2; exit}')
-        fi
-esac
-if [ -n "$sink" ]; then
-    if pactl set-default-sink "$sink" >& /dev/null; then
-        bashio::log.info "Setting default audio sink to: $sink"
-    else
-        bashio::log.warning "Failed to set audio sink to: $sink"
-    fi
-else
-    bashio::log.warning "No audio sink available"
-fi
-echo "Audio Sinks (* = default)"
-pactl list short sinks | awk -v def="$sink" '{prefix = ($2 == def) ? "*" : " "; printf "  %s%s\n", prefix, $0}'
-
-### Launch Xinput parsing...
-bashio::log.info "Starting Mouse & Touch input gesture command parsing..."
-python3 -u /mouse_touch_inputs.py  -d 1 -w "$COMMAND_WHITELIST" &
-
-#### Start  HAOSKiosk REST server
-bashio::log.info "Starting HAOSKiosk REST server..."
-python3 -u /rest_server.py &
-
-#### Optionally start vnc server
-if [ -n "$VNC_SERVER" ]; then
-    PRIMARY_DEV="$(ip route show | awk '/^default/ {print $5; exit}')"  # Returns name of primary device (typically Ethernet before WiFi)
-    HOST_IP="$(ip route show | sed -n "/\b${PRIMARY_DEV}\b/ s/.* src \([^ ]*\).*/\1/p" | head -1)"  # Return first IP address tied to primary device
-    VNC_PORT=5900
-
-    X11VNC_OPTS="-display :0 -rfbport $VNC_PORT -forever -bg -shared -quiet"
-    # Note caching and smoothing ("-ncache 10 -ncache_cr") not enabled since only works properly on some vnc viewers
-
-    bashio::log.info "Starting x11vnc server $([[ "$VNC_SERVER" == "-" ]] && echo "WITHOUT" || echo "WITH") password on port $VNC_PORT. Access at: $HOST_IP:$VNC_PORT"
-
-    if [ "$VNC_SERVER" != "-" ]; then  # Use password
-        VNC_PASSWD_FILE="/root/x11vnc.pass"
-
-        # Safely create obfuscated password file
-        printf '%s\n%s\ny\n' "${VNC_SERVER}" "${VNC_SERVER}" | x11vnc -storepasswd "$VNC_PASSWD_FILE" > /dev/null 2>&1
-        chown root:root "$VNC_PASSWD_FILE"
-        chmod 600 "$VNC_PASSWD_FILE"
-
-        X11VNC_OPTS="$X11VNC_OPTS -rfbauth $VNC_PASSWD_FILE"
-
-    else  # No password
-        X11VNC_OPTS="$X11VNC_OPTS -nopw"
-    fi
-
-    # shellcheck disable=SC2086
-    x11vnc $X11VNC_OPTS 2> >(grep -v 'The VNC desktop is:' >&2)
 fi
 
 #### Start browser (or debug mode)  and wait/sleep
