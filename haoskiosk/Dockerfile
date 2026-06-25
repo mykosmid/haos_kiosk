@@ -35,24 +35,19 @@ RUN apk update && apk add --no-cache \
 #     libinput-tools \
      udev \
      libinput-udev \
-
 ### Window, mouse, keyboard management
      openbox \
-
      unclutter-xfixes \
      ttf-dejavu \
 ### Linux utils
      bash \
      util-linux \
      patch \
-
 ### Full Timezone info
      icu-data-full \
 ### Python libraries
 #    py3-pip \
-
 ### Sound
-
 #     alsa-utils alsa-plugins-pulse \
 ### Video
 #     gstreamer-tools \
