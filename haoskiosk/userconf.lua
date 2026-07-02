@@ -66,7 +66,7 @@ local defaults = {
     SCREENSAVER_ENABLED = false,
     SCREENSAVER_TIMEOUT = 300,
     SCREENSAVER_INTERVAL = 15,
-    SCREENSAVER_MEDIA_FOLDER = "screensaver",
+    SCREENSAVER_MEDIA_FOLDER = "screensaver",  -- Empty means the root of Home Assistant's Local Media source
                         }
 local username = os.getenv("HA_USERNAME") or defaults.HA_USERNAME
 local password = os.getenv("HA_PASSWORD") or defaults.HA_PASSWORD
@@ -163,10 +163,9 @@ if screensaver_interval <= 0 then
     screensaver_interval = defaults.SCREENSAVER_INTERVAL
 end
 
+-- Path (relative to Local Media root) holding screensaver images; empty means the Local Media root itself
 local screensaver_media_folder = os.getenv("SCREENSAVER_MEDIA_FOLDER") or defaults.SCREENSAVER_MEDIA_FOLDER
-if screensaver_media_folder == "" then
-    screensaver_media_folder = defaults.SCREENSAVER_MEDIA_FOLDER
-end
+screensaver_media_folder = string.gsub(screensaver_media_folder, "^/+", ""):gsub("/+$", "") -- Strip leading/trailing '/'
 
 msg.info("SCREENSAVER_ENABLED=%s; SCREENSAVER_TIMEOUT=%d; SCREENSAVER_INTERVAL=%d; SCREENSAVER_MEDIA_FOLDER=%s",
     tostring(screensaver_enabled), screensaver_timeout, screensaver_interval, screensaver_media_folder)
@@ -595,24 +594,75 @@ if screensaver_enabled then
             var TIMEOUT_MS = %d;
             var INTERVAL_MS = %d;
             var FOLDER = '%s';
-            var overlay = null, img = null, slideTimer = null, idleTimer = null, images = [], idx = 0;
+            var MEDIA_STYLE = 'max-width:100%%;max-height:100%%;object-fit:contain;';
+            var overlay = null, slideTimer = null, idleTimer = null, images = [], idx = 0;
+            var bitmapDownscaleSupported = (typeof createImageBitmap === 'function');
 
             function getHass() {
                 var el = document.querySelector('home-assistant');
                 return el && el.hass;
             }
 
+            // Decode+downscale off-DOM via createImageBitmap so large photos (e.g. multi-MB
+            // phone camera originals) never get fully decoded/retained at full resolution -
+            // avoids OOM/crashes on memory-constrained devices like the Pi. Falls back to a
+            // plain <img> (browser-native decode) if the WebKit build lacks resize support.
+            function renderViaBitmap(url) {
+                var maxDim = Math.round(Math.min(Math.max(window.innerWidth, window.innerHeight) * (window.devicePixelRatio || 1), 1920));
+                return fetch(url)
+                    .then(function(r) { return r.blob(); })
+                    .then(function(blob) { return createImageBitmap(blob, { resizeWidth: maxDim, resizeQuality: 'medium' }); })
+                    .then(function(bitmap) {
+                        var canvas = document.createElement('canvas');
+                        canvas.width = bitmap.width;
+                        canvas.height = bitmap.height;
+                        canvas.style.cssText = MEDIA_STYLE;
+                        canvas.getContext('2d').drawImage(bitmap, 0, 0);
+                        bitmap.close();
+                        overlay.innerHTML = '';
+                        overlay.appendChild(canvas);
+                    });
+            }
+
+            function renderViaImg(url) {
+                return new Promise(function(resolve, reject) {
+                    var image = new Image();
+                    image.style.cssText = MEDIA_STYLE;
+                    image.onload = function() {
+                        overlay.innerHTML = '';
+                        overlay.appendChild(image);
+                        resolve();
+                    };
+                    image.onerror = reject;
+                    image.src = url;
+                });
+            }
+
+            function showImage(url) {
+                if (!overlay) return;
+                var render = bitmapDownscaleSupported ? renderViaBitmap(url) : renderViaImg(url);
+                render.catch(function(err) {
+                    if (bitmapDownscaleSupported) {
+                        console.warn('Screensaver: bitmap downscale failed, falling back to <img>', err);
+                        bitmapDownscaleSupported = false;
+                        return renderViaImg(url).catch(function(err2) {
+                            console.warn('Screensaver: failed to render image: ' + url, err2);
+                        });
+                    }
+                    console.warn('Screensaver: failed to render image: ' + url, err);
+                });
+            }
+
             function showNextImage() {
-                if (!img || !images.length) return;
+                if (!images.length) return;
                 idx = (idx + 1) %% images.length;
-                img.src = images[idx];
+                showImage(images[idx]);
             }
 
             function stopSlideshow() {
                 if (slideTimer) { clearInterval(slideTimer); slideTimer = null; }
                 if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
                 overlay = null;
-                img = null;
                 images = [];
             }
 
@@ -623,12 +673,10 @@ if screensaver_enabled then
                 overlay = document.createElement('div');
                 overlay.id = 'haoskiosk-screensaver';
                 overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#000;display:flex;align-items:center;justify-content:center;';
-                img = document.createElement('img');
-                img.style.cssText = 'max-width:100%%;max-height:100%%;object-fit:contain;';
-                overlay.appendChild(img);
                 document.body.appendChild(overlay);
 
-                hass.callWS({type: 'media_source/browse_media', media_content_id: 'media-source://media_source/local/' + FOLDER})
+                var mediaContentId = 'media-source://media_source/local' + (FOLDER ? '/' + FOLDER : '');
+                hass.callWS({type: 'media_source/browse_media', media_content_id: mediaContentId})
                     .then(function(result) {
                         var children = (result.children || []).filter(function(c) {
                             return c.media_class === 'image' || (c.media_content_type || '').indexOf('image') === 0;
@@ -642,16 +690,16 @@ if screensaver_enabled then
                     .then(function(urls) {
                         images = urls.filter(Boolean);
                         if (!images.length) {
-                            console.warn('Screensaver: no images found in local media folder: ' + FOLDER);
+                            console.warn('Screensaver: no images found in local media: ' + mediaContentId);
                             stopSlideshow();
                             return;
                         }
                         idx = Math.floor(Math.random() * images.length);
-                        img.src = images[idx];
+                        showImage(images[idx]);
                         slideTimer = setInterval(showNextImage, INTERVAL_MS);
                     })
                     .catch(function(err) {
-                        console.warn('Screensaver: failed to browse local media folder: ' + FOLDER, err);
+                        console.warn('Screensaver: failed to browse local media: ' + mediaContentId, err);
                         stopSlideshow();
                     });
             }

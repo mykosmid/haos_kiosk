@@ -27,6 +27,8 @@ RUN ALPINE_VER=$(cat /etc/alpine-release 2>/dev/null | cut -d. -f1-2) && \
     dbus \
     openbox \
     luakit \
+    imagemagick \
+    inotify-tools \
     && rm -rf /var/cache/apk/*
 
 ENV DISPLAY=:0
@@ -38,7 +40,7 @@ COPY xorg.conf.default /etc/X11/
 COPY userconf.lua /root/.config/luakit/
 COPY translations/*.yaml /translations/
 
-COPY run.sh /
-RUN chmod a+x /run.sh
+COPY run.sh screensaver_sync.sh /
+RUN chmod a+x /run.sh /screensaver_sync.sh
 
 CMD ["/run.sh"]

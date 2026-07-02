@@ -78,6 +78,9 @@ options:
   screensaver_timeout: 300
   screensaver_interval: 15
   screensaver_media_folder: "screensaver"
+  screensaver_source_folder: ""
+  screensaver_resize_width: 1920
+  screensaver_resize_height: 1080
 
 schema:
   ha_username: str
@@ -96,6 +99,9 @@ schema:
   screensaver_timeout: int(1,)
   screensaver_interval: int(1,)
   screensaver_media_folder: str
+  screensaver_source_folder: str
+  screensaver_resize_width: int(1,)
+  screensaver_resize_height: int(1,)
 
 translations:
   - en

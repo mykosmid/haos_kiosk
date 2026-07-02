@@ -66,10 +66,24 @@ load_config_var SCREENSAVER_ENABLED false
 load_config_var SCREENSAVER_TIMEOUT 300
 load_config_var SCREENSAVER_INTERVAL 15
 load_config_var SCREENSAVER_MEDIA_FOLDER screensaver
+load_config_var SCREENSAVER_SOURCE_FOLDER ""
+load_config_var SCREENSAVER_RESIZE_WIDTH 1920
+load_config_var SCREENSAVER_RESIZE_HEIGHT 1080
 
 if [ -z "$HA_USERNAME" ] || [ -z "$HA_PASSWORD" ]; then
     bashio::log.error "Error: HA_USERNAME and HA_PASSWORD must be set"
     exit 1
+fi
+
+################################################################################
+# Screensaver media sync: watch $SCREENSAVER_SOURCE_FOLDER (under /media) and
+# auto-resize/copy any images dropped there into $SCREENSAVER_MEDIA_FOLDER, so
+# you can just upload originals via the HA Media page without resizing them
+# yourself first (also caps decode size so huge originals can't stress the
+# device even before the in-browser downscale in userconf.lua kicks in).
+if [ "$SCREENSAVER_ENABLED" = true ]; then
+    /screensaver_sync.sh &
+    bashio::log.info "Started screensaver media sync (PID=$!)"
 fi
 
 ################################################################################

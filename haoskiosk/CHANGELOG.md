@@ -8,7 +8,15 @@
   `screensaver_interval`, `screensaver_media_folder`). Images can be
   uploaded/replaced remotely at any time via the HA app or web UI's Media
   page - no separate file share or add-on needed. Any touch, mouse, or key
-  input dismisses it.
+  input dismisses it. Images are decoded and downscaled to screen size via
+  `createImageBitmap` (falling back to a plain `<img>` if unsupported) so
+  large photo originals can't exhaust memory on constrained devices.
+- Added automatic screensaver media sync: a background watcher
+  (`screensaver_sync.sh`, requires `imagemagick`/`inotify-tools`) watches
+  `screensaver_source_folder` (default: "My media" root) and auto-resizes
+  (`screensaver_resize_width`/`screensaver_resize_height`, default
+  1920x1080) any images dropped there into `screensaver_media_folder`, so
+  original phone photos can be uploaded as-is without manual resizing.
 - Removed stale `examples/screensaver.sh`, which relied on a REST API that
   no longer exists in this Add-on.
 

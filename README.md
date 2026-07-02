@@ -226,11 +226,33 @@ Time in seconds between images shown in the slideshow. (Default: 15)
 
 ### Screensaver Media Folder
 
-Name of the folder (under Home Assistant's local Media source) that holds
-the screensaver images, e.g. `screensaver` maps to `/media/screensaver` on
-the Home Assistant host. Upload images into this folder via the Media page
-in the HA app or web UI — the folder is created automatically the first
-time you upload a file into it. (Default: "screensaver")
+Path (relative to Home Assistant's "My media" / local Media source root,
+i.e. `/media` on the HA host) that the kiosk slideshow reads images from.
+Leave blank to use the "My media" root itself. Otherwise set it to a
+subfolder name/path, e.g. `photos/frame` maps to `/media/photos/frame`.
+(Default: "screensaver")
+
+If **Screensaver Source Folder** is left blank (its default), upload
+images directly into this folder via the Media page in the HA app or web
+UI — subfolders are created automatically the first time you upload a
+file into them.
+
+### Screensaver Source Folder
+
+Path (relative to "My media") to watch for images to automatically
+resize and copy into **Screensaver Media Folder**. Leave blank to watch
+the "My media" root itself — this is the recommended setup: upload your
+original photos straight to "My media" (no resizing needed on your end)
+and the Add-on resizes/copies them into the Screensaver Media Folder for
+you. Must not be the same folder as Screensaver Media Folder. (Default:
+"")
+
+### Screensaver Resize Width / Screensaver Resize Height
+
+Maximum dimensions (in pixels) for images auto-resized by Screensaver
+Source Folder. Aspect ratio is preserved and images are never upscaled —
+only large originals (e.g. full-resolution phone photos) are shrunk, which
+keeps memory/CPU use low on the kiosk device. (Default: 1920 x 1080)
 
 ______________________________________________________________________
 
