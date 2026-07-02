@@ -62,6 +62,11 @@ local defaults = {
     LOGIN_DELAY = 1,
     ZOOM_LEVEL = 100,
     BROWSER_REFRESH = 600,
+
+    SCREENSAVER_ENABLED = false,
+    SCREENSAVER_TIMEOUT = 300,
+    SCREENSAVER_INTERVAL = 15,
+    SCREENSAVER_MEDIA_FOLDER = "screensaver",
                         }
 local username = os.getenv("HA_USERNAME") or defaults.HA_USERNAME
 local password = os.getenv("HA_PASSWORD") or defaults.HA_PASSWORD
@@ -132,6 +137,40 @@ end
 msg.info("USERNAME=%s; URL=%s; DARK_MODE=%s; SIDEBAR=%s; THEME=%s; LOGIN_DELAY=%.1f, ZOOM_LEVEL=%d, BROWSER_REFRESH=%d",
     username, ha_url, tostring(dark_mode), sidebar, theme, login_delay, zoom_level, browser_refresh)
 
+local raw_screensaver_enabled = os.getenv("SCREENSAVER_ENABLED")
+if raw_screensaver_enabled == nil then
+    screensaver_enabled = defaults.SCREENSAVER_ENABLED
+else
+    screensaver_enabled = raw_screensaver_enabled:lower()
+    if screensaver_enabled == "true" then
+        screensaver_enabled = true
+    elseif screensaver_enabled == "false" then
+        screensaver_enabled = false
+    else
+        screensaver_enabled = defaults.SCREENSAVER_ENABLED
+    end
+end
+
+local screensaver_timeout = tonumber(os.getenv("SCREENSAVER_TIMEOUT")) or defaults.SCREENSAVER_TIMEOUT  -- Idle seconds before screensaver starts
+if screensaver_timeout <= 0 then
+    msg.warn("Invalid SCREENSAVER_TIMEOUT value: '%s'; defaulting to %d", os.getenv("SCREENSAVER_TIMEOUT") or "", defaults.SCREENSAVER_TIMEOUT)
+    screensaver_timeout = defaults.SCREENSAVER_TIMEOUT
+end
+
+local screensaver_interval = tonumber(os.getenv("SCREENSAVER_INTERVAL")) or defaults.SCREENSAVER_INTERVAL  -- Seconds between slideshow images
+if screensaver_interval <= 0 then
+    msg.warn("Invalid SCREENSAVER_INTERVAL value: '%s'; defaulting to %d", os.getenv("SCREENSAVER_INTERVAL") or "", defaults.SCREENSAVER_INTERVAL)
+    screensaver_interval = defaults.SCREENSAVER_INTERVAL
+end
+
+local screensaver_media_folder = os.getenv("SCREENSAVER_MEDIA_FOLDER") or defaults.SCREENSAVER_MEDIA_FOLDER
+if screensaver_media_folder == "" then
+    screensaver_media_folder = defaults.SCREENSAVER_MEDIA_FOLDER
+end
+
+msg.info("SCREENSAVER_ENABLED=%s; SCREENSAVER_TIMEOUT=%d; SCREENSAVER_INTERVAL=%d; SCREENSAVER_MEDIA_FOLDER=%s",
+    tostring(screensaver_enabled), screensaver_timeout, screensaver_interval, screensaver_media_folder)
+
 -- -----------------------------------------------------------------------
 -- Forward console messages to stdout
 settings.set_setting("webview.enable_write_console_messages_to_stdout", true)
@@ -146,6 +185,12 @@ end)
 
 -- Set zoom level for windows (default 100%)
 settings.webview.zoom_level = zoom_level
+
+-- Disable smooth scrolling: WEBKIT_DISABLE_COMPOSITING_MODE forces CPU-only
+-- rendering (required on RPi4 + DSI touchscreen to avoid a GPU driver hang -
+-- see Dockerfile), so scroll animation is extra CPU work with no GPU to
+-- offload it to; disabling it removes that cost.
+settings.webview.enable_smooth_scrolling = false
 
 -- Set default new tab and window to blank page, rather than commercial luakit page
 settings.window.home_page    = "about:blank"
@@ -181,8 +226,66 @@ local ha_settings_applied = setmetatable({}, { __mode = "k" }) -- Flag to track 
 webview.add_signal("init", function(view)
     ha_settings_applied[view] = false  -- Set theme and sidebar settings once  per view
 
+    -- Reduce CPU-compositing workload (WEBKIT_DISABLE_COMPOSITING_MODE forces
+    -- software rendering - see Dockerfile) by neutering CSS animations and
+    -- transitions, including inside Shadow DOM (HA's Lovelace cards, dialogs
+    -- and sidebar are almost all Shadow DOM custom elements, so a plain
+    -- <style> in the document head alone would miss most of them).
+    -- Durations are set near-zero rather than exactly 0 so that code waiting
+    -- on 'transitionend'/'animationend' events (e.g., dialog close handlers)
+    -- still fires.
+    local js_disable_animations = [[
+        (function() {
+            var STYLE_ID = 'haoskiosk-no-animations';
+            var css = '*, *::before, *::after {' +
+                'animation-duration: 0.001s !important;' +
+                'animation-delay: -0.001s !important;' +
+                'transition-duration: 0.001s !important;' +
+                'transition-delay: -0.001s !important;' +
+                'scroll-behavior: auto !important;' +
+            '}';
+
+            function injectInto(root) {
+                if (!root || (root.querySelector && root.querySelector('#' + STYLE_ID))) return;
+                var style = document.createElement('style');
+                style.id = STYLE_ID;
+                style.textContent = css;
+                root.appendChild(style);
+            }
+
+            if (document.head) injectInto(document.head);
+
+            (function walk(node) {
+                if (node.shadowRoot) {
+                    injectInto(node.shadowRoot);
+                    node.shadowRoot.querySelectorAll('*').forEach(walk);
+                }
+                if (node.children) {
+                    for (var i = 0; i < node.children.length; i++) walk(node.children[i]);
+                }
+            })(document.documentElement);
+
+            // Patch attachShadow once so future shadow roots (new cards,
+            // dialogs, popups opened later) get the stylesheet too
+            if (!Element.prototype.__haoskiosk_attachShadow_patched) {
+                var origAttachShadow = Element.prototype.attachShadow;
+                Element.prototype.attachShadow = function(init) {
+                    var root = origAttachShadow.call(this, init);
+                    try { injectInto(root); } catch (e) {}
+                    return root;
+                };
+                Element.prototype.__haoskiosk_attachShadow_patched = true;
+            }
+        })();
+    ]]
+
     -- Listen for page load status events
     view:add_signal("load-status", function(v, status)  -- Note do NOT used "load-finished" since doesn't handle redirects properly
+
+        -- Inject as early as possible (before HA's custom elements start attaching shadow roots)
+        if status == "committed" then
+            v:eval_js(js_disable_animations, { source = "disable_animations_early.js", no_return = true })
+        end
 
         -- Restart luakit if consecutive_load_failures > MAX_LOAD_FAILURES
         if status == "failed" then
@@ -326,6 +429,11 @@ webview.add_signal("init", function(view)
 
             ha_settings_applied[v] = true   -- Mark in Lua session as settings applied
         end
+
+        -- Re-run once the page has fully finished loading, as a fallback in
+        -- case any shadow roots were attached before the "committed"-stage
+        -- injection above installed its attachShadow patch
+        v:eval_js(js_disable_animations, { source = "disable_animations.js", no_return = true })
 
         -- Suppress known harmless unhandled promise rejections in kiosk environment
         --   - Service worker / script load failures during reloads
@@ -471,6 +579,104 @@ webview.add_signal("init", function(view)
 
     end
 end)
+-- -----------------------------------------------------------------------
+-- Screensaver: after $SCREENSAVER_TIMEOUT idle seconds, show a fullscreen
+-- slideshow of images pulled live from Home Assistant's local Media source
+-- (folder name set by $SCREENSAVER_MEDIA_FOLDER). Images can be uploaded
+-- remotely to that folder via the HA mobile app or web UI's Media page -
+-- no separate file share or add-on required. Any touch/mouse/key activity
+-- dismisses the screensaver and resets the idle timer.
+if screensaver_enabled then
+    local js_screensaver = string.format([[
+        (function() {
+            if (window.haoskiosk_screensaver_installed) return;
+            window.haoskiosk_screensaver_installed = true;
+
+            var TIMEOUT_MS = %d;
+            var INTERVAL_MS = %d;
+            var FOLDER = '%s';
+            var overlay = null, img = null, slideTimer = null, idleTimer = null, images = [], idx = 0;
+
+            function getHass() {
+                var el = document.querySelector('home-assistant');
+                return el && el.hass;
+            }
+
+            function showNextImage() {
+                if (!img || !images.length) return;
+                idx = (idx + 1) %% images.length;
+                img.src = images[idx];
+            }
+
+            function stopSlideshow() {
+                if (slideTimer) { clearInterval(slideTimer); slideTimer = null; }
+                if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                overlay = null;
+                img = null;
+                images = [];
+            }
+
+            function startSlideshow() {
+                var hass = getHass();
+                if (!hass) return;
+
+                overlay = document.createElement('div');
+                overlay.id = 'haoskiosk-screensaver';
+                overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#000;display:flex;align-items:center;justify-content:center;';
+                img = document.createElement('img');
+                img.style.cssText = 'max-width:100%%;max-height:100%%;object-fit:contain;';
+                overlay.appendChild(img);
+                document.body.appendChild(overlay);
+
+                hass.callWS({type: 'media_source/browse_media', media_content_id: 'media-source://media_source/local/' + FOLDER})
+                    .then(function(result) {
+                        var children = (result.children || []).filter(function(c) {
+                            return c.media_class === 'image' || (c.media_content_type || '').indexOf('image') === 0;
+                        });
+                        return Promise.all(children.map(function(c) {
+                            return hass.callWS({type: 'media_source/resolve_media', media_content_id: c.media_content_id})
+                                .then(function(r) { return new URL(r.url, location.origin).href; })
+                                .catch(function() { return null; });
+                        }));
+                    })
+                    .then(function(urls) {
+                        images = urls.filter(Boolean);
+                        if (!images.length) {
+                            console.warn('Screensaver: no images found in local media folder: ' + FOLDER);
+                            stopSlideshow();
+                            return;
+                        }
+                        idx = Math.floor(Math.random() * images.length);
+                        img.src = images[idx];
+                        slideTimer = setInterval(showNextImage, INTERVAL_MS);
+                    })
+                    .catch(function(err) {
+                        console.warn('Screensaver: failed to browse local media folder: ' + FOLDER, err);
+                        stopSlideshow();
+                    });
+            }
+
+            function resetIdleTimer() {
+                if (overlay) stopSlideshow();
+                if (idleTimer) clearTimeout(idleTimer);
+                idleTimer = setTimeout(startSlideshow, TIMEOUT_MS);
+            }
+
+            ['mousedown', 'mousemove', 'touchstart', 'keydown', 'wheel'].forEach(function(evt) {
+                window.addEventListener(evt, resetIdleTimer, {capture: true, passive: true});
+            });
+
+            resetIdleTimer();
+        })();
+    ]], screensaver_timeout * 1000, screensaver_interval * 1000, single_quote_escape(screensaver_media_folder))
+
+    webview.add_signal("init", function(view)
+        view:add_signal("load-status", function(v, status)
+            if status ~= "finished" then return end
+            v:eval_js(js_screensaver, { source = "screensaver.js", no_return = true })
+        end)
+    end)
+end
 -- -----------------------------------------------------------------------
 -- Tab and Window functions
 

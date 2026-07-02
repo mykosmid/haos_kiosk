@@ -204,6 +204,34 @@ Manually, launch `luakit` (e.g.,
 `luakit -U localhost:8123/<your-dashboard>`) from Docker container.\
 E.g., `sudo docker exec -it addon_haoskiosk bash`
 
+### Screensaver Enabled
+
+If `True`, shows a fullscreen image slideshow after the dashboard has been
+idle (no touch, mouse, or key input) for **Screensaver Timeout** seconds.
+Any input dismisses the slideshow and returns to the dashboard. (Default:
+False)
+
+Images are pulled live from Home Assistant's built-in local **Media**
+source, so you can upload/replace them remotely at any time from the
+Home Assistant mobile app or web UI (sidebar **Media** page), without
+touching the kiosk device or restarting the Add-on.
+
+### Screensaver Timeout
+
+Idle time in seconds before the screensaver starts. (Default: 300)
+
+### Screensaver Interval
+
+Time in seconds between images shown in the slideshow. (Default: 15)
+
+### Screensaver Media Folder
+
+Name of the folder (under Home Assistant's local Media source) that holds
+the screensaver images, e.g. `screensaver` maps to `/media/screensaver` on
+the Home Assistant host. Upload images into this folder via the Media page
+in the HA app or web UI — the folder is created automatically the first
+time you upload a file into it. (Default: "screensaver")
+
 ______________________________________________________________________
 
 ## KEYBOARD SHORTCUTS

@@ -62,6 +62,10 @@ load_config_var ROTATE_DISPLAY normal
 load_config_var MAP_TOUCH_INPUTS true
 load_config_var KEYBOARD_LAYOUT us
 load_config_var DEBUG_MODE false
+load_config_var SCREENSAVER_ENABLED false
+load_config_var SCREENSAVER_TIMEOUT 300
+load_config_var SCREENSAVER_INTERVAL 15
+load_config_var SCREENSAVER_MEDIA_FOLDER screensaver
 
 if [ -z "$HA_USERNAME" ] || [ -z "$HA_PASSWORD" ]; then
     bashio::log.error "Error: HA_USERNAME and HA_PASSWORD must be set"

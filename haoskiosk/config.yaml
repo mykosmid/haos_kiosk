@@ -74,6 +74,10 @@ options:
   map_touch_inputs: true
   keyboard_layout: us
   debug_mode: false
+  screensaver_enabled: false
+  screensaver_timeout: 300
+  screensaver_interval: 15
+  screensaver_media_folder: "screensaver"
 
 schema:
   ha_username: str
@@ -88,6 +92,10 @@ schema:
   map_touch_inputs: bool
   keyboard_layout: str
   debug_mode: bool
+  screensaver_enabled: bool
+  screensaver_timeout: int(1,)
+  screensaver_interval: int(1,)
+  screensaver_media_folder: str
 
 translations:
   - en

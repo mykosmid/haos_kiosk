@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.0 - July 2026
+
+- Added built-in screensaver: after a configurable idle timeout, shows a
+  fullscreen slideshow of images pulled live from Home Assistant's local
+  Media source (`screensaver_enabled`, `screensaver_timeout`,
+  `screensaver_interval`, `screensaver_media_folder`). Images can be
+  uploaded/replaced remotely at any time via the HA app or web UI's Media
+  page - no separate file share or add-on needed. Any touch, mouse, or key
+  input dismisses it.
+- Removed stale `examples/screensaver.sh`, which relied on a REST API that
+  no longer exists in this Add-on.
+
 ## v1.3.2 - April 2026
 
 - Added explicit BUILD_FROM location to Dockerfile for ha core 2026.04+

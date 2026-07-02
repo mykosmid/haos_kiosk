@@ -51,3 +51,21 @@ configuration:
     description: |
       Launch X but not browser. [Default: False]
       Manually access using: docker exec -it addon_haoskiosk bash
+  screensaver_enabled:
+    name: "Screensaver Enabled"
+    description: |
+      Show a fullscreen image slideshow after a period of inactivity, using
+      images from Home Assistant's local Media folder. Any touch, mouse or
+      key input dismisses it. [Default: False]
+  screensaver_timeout:
+    name: "Screensaver Timeout"
+    description: "Idle time in seconds before the screensaver starts [Default: 300]"
+  screensaver_interval:
+    name: "Screensaver Interval"
+    description: "Time in seconds between images in the slideshow [Default: 15]"
+  screensaver_media_folder:
+    name: "Screensaver Media Folder"
+    description: |
+      Name of the folder under Home Assistant's local Media source that
+      holds the screensaver images. Upload images to it via the Home
+      Assistant app or web UI's Media page. [Default: "screensaver"]
