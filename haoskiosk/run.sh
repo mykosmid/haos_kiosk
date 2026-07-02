@@ -69,6 +69,21 @@ if [ -z "$HA_USERNAME" ] || [ -z "$HA_PASSWORD" ]; then
 fi
 
 ################################################################################
+# GTK/DBUS-related environment variables to improve stability
+export GTK_USE_PORTAL=0               # Disable portals
+export GIO_USE_VFS=local              # Local-only GIO
+export DBUS_SESSION_BUS_TIMEOUT=5000  # Shorten DBUS timeouts
+
+################################################################################
+# Start dbus so GTK/WebKit calls that expect a session bus don't hang/retry
+DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address)
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+    bashio::log.warning "WARNING: Failed to start dbus-daemon"
+fi
+export DBUS_SESSION_BUS_ADDRESS
+bashio::log.info "DBus started with: DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
+
+################################################################################
 # Hack to get writable /dev/tty0 for X
 if [ -e "/dev/tty0" ]; then
     bashio::log.info "Remounting /dev as rw to delete /dev/tty0..."
@@ -166,6 +181,17 @@ bashio::log.info "X server started successfully after $i seconds..."
 
 # Stop console blinking cursor
 echo -e "\033[?25l" > /dev/console
+
+################################################################################
+# Start Openbox window manager (needed so luakit's fullscreen request is honored)
+openbox &
+O_PID=$!
+sleep 0.5
+if ! kill -0 "$O_PID" 2>/dev/null; then
+    bashio::log.error "Failed to start Openbox window manager"
+    exit 1
+fi
+bashio::log.info "Openbox window manager started successfully..."
 
 ################################################################################
 # Configure screen timeout

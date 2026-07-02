@@ -24,11 +24,12 @@ RUN ALPINE_VER=$(cat /etc/alpine-release 2>/dev/null | cut -d. -f1-2) && \
     libdrm \
     bash \
     util-linux \
+    dbus \
+    openbox \
     luakit \
     && rm -rf /var/cache/apk/*
 
 ENV DISPLAY=:0
-ENV WEBKIT_DISABLE_COMPOSITING_MODE=1
 ENV WEBKIT_FORCE_COMPLEX_TEXT=1
 ENV NO_AT_BRIDGE=1
 
