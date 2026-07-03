@@ -220,6 +220,7 @@ class Renderer:
         self.font_name = _load_font(FONT_CANDIDATES, 22)
         self.font_state = _load_font(FONT_BOLD_CANDIDATES + FONT_CANDIDATES, 30)
         self.font_small = _load_font(FONT_CANDIDATES, 18)
+        self.expanded = False  # tapping the shopping list widget toggles this
 
         total_slots = len(entity_ids) + (1 if shopping_list_entity else 0)
         self.cols = 3 if total_slots > 6 else 2
@@ -232,6 +233,14 @@ class Renderer:
     def render(self, client):
         img = Image.new("RGB", (self.width, self.height), self.palette["bg"])
         draw = ImageDraw.Draw(img)
+
+        if self.shopping_list_entity and self.expanded:
+            # Expanded view replaces the whole screen so there's room to show
+            # more items at a readable size; tapping anywhere collapses it.
+            rect = (CARD_MARGIN, CARD_MARGIN, self.width - CARD_MARGIN, self.height - CARD_MARGIN)
+            self._draw_shopping_list(draw, rect, client, expanded=True)
+            return img, [], rect
+
         cards = []
         cell_w = self.width // self.cols
         cell_h = self.height // self.rows
@@ -264,10 +273,12 @@ class Renderer:
             cards.append(Card(rect=rect, entity_id=entity_id, domain=domain))
             cell_index += 1
 
+        widget_rect = None
         if self.shopping_list_entity:
-            self._draw_shopping_list(draw, self._cell_rect(self.reserved_index, cell_w, cell_h), client)
+            widget_rect = self._cell_rect(self.reserved_index, cell_w, cell_h)
+            self._draw_shopping_list(draw, widget_rect, client)
 
-        return img, cards
+        return img, cards, widget_rect
 
     def _cell_rect(self, cell_index, cell_w, cell_h):
         row, col = divmod(cell_index, self.cols)
@@ -275,14 +286,19 @@ class Renderer:
         x1, y1 = (col + 1) * cell_w - CARD_MARGIN, (row + 1) * cell_h - CARD_MARGIN
         return x0, y0, x1, y1
 
-    def _draw_shopping_list(self, draw, rect, client):
+    def _draw_shopping_list(self, draw, rect, client, expanded=False):
         x0, y0, x1, y1 = rect
         draw.rounded_rectangle([x0, y0, x1, y1], radius=14, fill=self.palette["card"])
-        draw.text((x0 + 16, y0 + 14), "Shopping List", font=self.font_name, fill=self.palette["text"])
+
+        title_font = self.font_state if expanded else self.font_name
+        item_font = self.font_name if expanded else self.font_small
+        line_height = 36 if expanded else 26
+        title_gap = 60 if expanded else 50
+
+        draw.text((x0 + 16, y0 + 14), "Shopping List", font=title_font, fill=self.palette["text"])
 
         items = [item for item in client.get_todo_items() if item.get("status") != "completed"]
-        line_height = 26
-        y = y0 + 50
+        y = y0 + title_gap
         max_lines = max(0, (y1 - 12 - y) // line_height)
         visible, overflow = items[:max_lines], max(0, len(items) - max_lines)
         if overflow and visible:
@@ -291,14 +307,14 @@ class Renderer:
             visible, overflow = items[:max_lines - 1], len(items) - (max_lines - 1)
 
         for item in visible:
-            text = _truncate_text(draw, item.get("summary", ""), self.font_small, (x1 - 16) - (x0 + 16))
-            draw.text((x0 + 16, y), f"• {text}", font=self.font_small, fill=self.palette["text"])
+            text = _truncate_text(draw, item.get("summary", ""), item_font, (x1 - 16) - (x0 + 16))
+            draw.text((x0 + 16, y), f"• {text}", font=item_font, fill=self.palette["text"])
             y += line_height
 
         if not items:
-            draw.text((x0 + 16, y), "(empty)", font=self.font_small, fill=self.palette["text"])
+            draw.text((x0 + 16, y), "(empty)", font=item_font, fill=self.palette["text"])
         elif overflow:
-            draw.text((x0 + 16, y), f"+{overflow} more", font=self.font_small, fill=self.palette["accent"])
+            draw.text((x0 + 16, y), f"+{overflow} more", font=item_font, fill=self.palette["accent"])
 
 
 def _friendly_name(state, entity_id):
@@ -433,16 +449,20 @@ def _scale_axis(value, absinfo, screen_size):
     return max(0, min(screen_size - 1, round((value - absinfo.min) / span * screen_size)))
 
 
-def handle_tap(pos, cards, client):
+def _point_in_rect(pos, rect):
     x, y = pos
+    x0, y0, x1, y1 = rect
+    return x0 <= x <= x1 and y0 <= y <= y1
+
+
+def handle_tap(pos, cards, client):
     for card in cards:
-        x0, y0, x1, y1 = card.rect
-        if x0 <= x <= x1 and y0 <= y <= y1:
+        if _point_in_rect(pos, card.rect):
             if card.domain in TOGGLE_DOMAINS:
-                log.info("Tap at (%d, %d): toggling %s", x, y, card.entity_id)
+                log.info("Tap at %s: toggling %s", pos, card.entity_id)
                 client.call_service(card.domain, "toggle", card.entity_id)
             else:
-                log.debug("Tap at (%d, %d) on read-only card: %s", x, y, card.entity_id)
+                log.debug("Tap at %s on read-only card: %s", pos, card.entity_id)
             return
 
 
@@ -521,11 +541,12 @@ def main():
     client.start()
 
     last_cards = []
+    last_widget_rect = None
     try:
         while True:
             if dirty.is_set():
                 dirty.clear()
-                image, last_cards = renderer.render(client)
+                image, last_cards, last_widget_rect = renderer.render(client)
                 fb.blit(image)
 
             fds = touch.fds()
@@ -536,7 +557,11 @@ def main():
             for fd in readable:
                 tap = touch.process(fd)
                 if tap:
-                    handle_tap(tap, last_cards, client)
+                    if last_widget_rect and _point_in_rect(tap, last_widget_rect):
+                        renderer.expanded = not renderer.expanded
+                        dirty.set()
+                    else:
+                        handle_tap(tap, last_cards, client)
     except KeyboardInterrupt:
         pass
     finally:

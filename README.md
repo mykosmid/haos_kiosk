@@ -23,7 +23,8 @@ right fit.
 A read-only shopping list widget can also be shown in the bottom-right
 corner of the grid, pulled live from a Home Assistant `todo` list (e.g. the
 built-in Shopping List integration). It is enabled by default and shown
-regardless of how many entities you configure.
+regardless of how many entities you configure. Tap it to expand it to a
+full-screen list; tap anywhere to collapse it back to the grid.
 
 **NOTE:** You must generate a Home Assistant long-lived access token and
 enter it, along with the entities you want to display, in the

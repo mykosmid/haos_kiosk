@@ -7,6 +7,9 @@
   pulled live from a Home Assistant `todo` list over the existing WebSocket
   connection. Entities flow around the reserved corner cell automatically.
   Set the option to `none` to hide the widget.
+- The shopping list widget can be tapped to expand it to a full-screen view
+  (larger text, more items visible); tapping again collapses it back to its
+  corner of the grid.
 
 ## v2.0.0 - July 2026
 
