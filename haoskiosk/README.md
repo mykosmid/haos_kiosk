@@ -53,6 +53,15 @@ expected to be in its normal landscape orientation. An optional
 idle/screensaver mode (see **Screensaver Timeout** below) can turn the
 display into a smart photo frame after a period of no touch input.
 
+**NOTE:** While running, the Add-on switches the underlying Linux console
+into graphics mode so the kernel's own blinking text cursor doesn't bleed
+through on top of the display, restoring it if the Add-on stops cleanly.
+This requires access to a console device (`/dev/tty0`, `/dev/console`, or
+`/dev/tty1`) and the `SYS_TTY_CONFIG` capability, both already granted by
+this Add-on's configuration - if you've forked or manually configured the
+container yourself and still see a cursor, check that those aren't
+stripped out.
+
 **NOTE:** If you encounter issues with the Add-on, please first check the
 HAOSKiosk github
 [issues page](https://github.com/puterboy/HAOS-kiosk/issues) (open and
@@ -158,20 +167,26 @@ widget happens to be underneath. Set to `0` to disable. (Default: 60)
 
 ### Screensaver Source Directory
 
-Absolute path to a folder of full-resolution photos to pull from, e.g.
-`/media/family_photos` (Home Assistant's `/media` folder, mapped
-read-write into this Add-on - drop files in there via the Media or File
-Editor Add-on/Samba share). Searched recursively.
+Absolute path to a "drop zone" folder for full-resolution photos, e.g.
+`/media/screensaver_uploads` (a folder under Home Assistant's `/media`,
+mapped read-write into this Add-on - drop files in there via the Media or
+File Editor Add-on/Samba share). Searched recursively.
 
-If set, the Add-on automatically mirrors every photo into **Screensaver
+If set, the Add-on **moves** every photo it finds here into **Screensaver
 Photo Directory**, downscaled and center-cropped to exactly fill the
-display's resolution, so the screensaver never has to decode a
-full-resolution photo at render time. It keeps that folder in sync on a
-timer (**Screensaver Sync Interval**) - add or remove a photo in the source
-folder and it's reflected there automatically, no restart needed. This
-runs once synchronously at startup before the display comes up, so a large
-source folder will add to Add-on startup time the first time (subsequent
-syncs only process what changed).
+display's resolution - the original is deleted from this folder once its
+resized copy is saved. This folder is meant to sit empty between uploads:
+drop photos in, they get processed and moved out on the next sync
+(**Screensaver Sync Interval**), and nothing is left behind. It is not
+mirrored or reconciled against the destination on later syncs - each photo
+only passes through here once.
+
+Do not point this at the same folder as, or a parent/child of, Screensaver
+Photo Directory in a way that isn't the intended "photo dir lives inside
+the source dir" layout (e.g. `/media` as the source and
+`/media/screensavers` as the destination is fine and exactly what the
+Add-on expects - it deliberately skips its own destination folder while
+scanning).
 
 Leave blank to manage **Screensaver Photo Directory**'s contents yourself
 instead - the Add-on won't touch that folder. (Default: blank)
@@ -181,10 +196,10 @@ instead - the Add-on won't touch that folder. (Default: blank)
 Absolute path to the folder of photos (`.jpg`, `.jpeg`, `.png`, `.bmp`,
 `.gif`) the screensaver actually rotates through full-screen.
 
-- If **Screensaver Source Directory** is set, this folder is fully managed
-  by the Add-on (downscaled copies written in, stale ones removed
-  automatically) - don't add or edit files in it directly, they'll be
-  removed on the next sync.
+- If **Screensaver Source Directory** is set, this is the permanent,
+  Add-on-managed destination photos get moved into. To remove a photo from
+  the screensaver, delete it here directly - it won't reappear, since its
+  original in the source folder is already gone by that point.
 - If **Screensaver Source Directory** is blank, populate this folder
   yourself; photos aren't resized in that case, so pre-size them to the
   display's resolution for best results and lowest memory use.
@@ -200,8 +215,8 @@ photos in it. (Default: 300)
 
 ### Screensaver Sync Interval (seconds)
 
-How often to re-scan Screensaver Source Directory for added, removed, or
-changed photos and re-sync Screensaver Photo Directory. Only relevant if
+How often to check Screensaver Source Directory for newly-dropped photos
+and move/resize them into Screensaver Photo Directory. Only relevant if
 Screensaver Source Directory is configured. (Default: 600)
 
 ### Minimum Free Memory (MB)

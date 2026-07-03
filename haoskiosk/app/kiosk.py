@@ -80,6 +80,49 @@ Card = collections.namedtuple("Card", ["rect", "entity_id", "domain"])
 FBIOGET_VSCREENINFO = 0x4600
 FBIOGET_FSCREENINFO = 0x4602
 
+# Linux VT ioctl (see <linux/kd.h>) used to hide the console cursor.
+KDSETMODE = 0x4B3A
+KD_TEXT = 0x00
+KD_GRAPHICS = 0x01
+
+_CONSOLE_CANDIDATES = ["/dev/tty0", "/dev/console", "/dev/tty1"]
+
+
+def hide_console_cursor():
+    """Switches the active Linux virtual console into graphics mode, so the
+    kernel's own fbcon driver stops blinking its text cursor on top of
+    whatever this app draws to /dev/fb0 by hand. Returns the console fd (to
+    later pass to restore_console_cursor()), or None if no console device
+    was accessible - not fatal, just means the cursor may stay visible."""
+    for path in _CONSOLE_CANDIDATES:
+        try:
+            fd = os.open(path, os.O_RDWR)
+        except OSError:
+            continue
+        try:
+            fcntl.ioctl(fd, KDSETMODE, KD_GRAPHICS)
+            log.info("Console %s switched to graphics mode (hides the blinking cursor)", path)
+            return fd
+        except OSError as exc:
+            log.warning("Could not switch console %s to graphics mode: %s", path, exc)
+            os.close(fd)
+    log.warning(
+        "No accessible console device (tried: %s) - the console cursor may remain visible over the display",
+        ", ".join(_CONSOLE_CANDIDATES),
+    )
+    return None
+
+
+def restore_console_cursor(fd):
+    if fd is None:
+        return
+    try:
+        fcntl.ioctl(fd, KDSETMODE, KD_TEXT)
+    except OSError:
+        log.exception("Failed to restore console text mode")
+    finally:
+        os.close(fd)
+
 # struct fb_var_screeninfo is entirely __u32 fields, so this layout is stable
 # across 32-bit and 64-bit architectures.
 _VSCREENINFO_FMT = "40I"
@@ -558,22 +601,39 @@ def _load_font(candidates, size):
 
 
 # ---------------------------------------------------------------------------
-# Screensaver photo sync (mirrors + downscales a source media folder)
+# Screensaver photo sync (moves + downscales photos out of a media drop zone)
 # ---------------------------------------------------------------------------
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".gif")
 
 
 def sync_screensaver_photos(source_dir, dest_dir, target_size):
-    """Mirrors image files from source_dir (recursively) into dest_dir as
-    JPEGs downscaled/cropped to target_size (the screen's own resolution),
-    so the screensaver never has to decode or resize a full-resolution photo
-    at render time. Skips files whose resized copy is already up to date
-    (by mtime) and removes resized copies whose source no longer exists, so
-    it's cheap to re-run on a timer and just picks up whatever changed in
-    the source folder."""
+    """Moves image files out of source_dir (recursively) into dest_dir,
+    downscaling/cropping each one to target_size (the screen's own
+    resolution) as it goes, deleting the original only once its resized
+    copy has been saved successfully. source_dir is meant purely as a drop
+    zone - e.g. a folder under Home Assistant's /media - and dest_dir as the
+    durable, kiosk-managed photo store the screensaver actually reads from;
+    there is no reconciliation pass, since nothing is meant to persist in
+    source_dir between syncs.
+
+    dest_dir is explicitly excluded from the walk. It's commonly a
+    subfolder of source_dir (e.g. source=/media, dest=/media/screensavers),
+    and without this a naive recursive walk would pick up its own
+    already-resized output as a "new" source photo on every subsequent
+    sync, re-processing it under a new name forever - duplicating the same
+    photo a little more each cycle.
+    """
     if not os.path.isdir(source_dir):
         log.warning("Screensaver sync: source dir %s does not exist - skipping sync", source_dir)
+        return
+
+    source_real = os.path.realpath(source_dir)
+    dest_real = os.path.realpath(dest_dir)
+    if source_real == dest_real:
+        log.error(
+            "Screensaver sync: source and destination directories are the same (%s) - skipping sync", source_dir,
+        )
         return
 
     try:
@@ -582,39 +642,27 @@ def sync_screensaver_photos(source_dir, dest_dir, target_size):
         log.exception("Screensaver sync: could not create destination dir %s", dest_dir)
         return
 
-    sources = {}
-    for root, _dirs, names in os.walk(source_dir):
+    processed = 0
+    for root, dirs, names in os.walk(source_dir, topdown=True):
+        dirs[:] = [d for d in dirs if os.path.realpath(os.path.join(root, d)) != dest_real]
         for name in names:
             if not name.lower().endswith(IMAGE_EXTS):
                 continue
             src_path = os.path.join(root, name)
             rel = os.path.relpath(src_path, source_dir)
-            dest_name = rel.replace(os.sep, "__")
-            sources[os.path.splitext(dest_name)[0] + ".jpg"] = src_path
-
-    existing = set(os.listdir(dest_dir))
-    for stale_name in existing - sources.keys():
-        try:
-            os.remove(os.path.join(dest_dir, stale_name))
-            log.info("Screensaver sync: removed stale copy %s", stale_name)
-        except OSError:
-            log.exception("Screensaver sync: failed to remove stale copy %s", stale_name)
-
-    processed = 0
-    for dest_name, src_path in sources.items():
-        dest_path = os.path.join(dest_dir, dest_name)
-        try:
-            if os.path.exists(dest_path) and os.path.getmtime(dest_path) >= os.path.getmtime(src_path):
-                continue
-            with Image.open(src_path) as raw:
-                fitted = _fit_cover(raw.convert("RGB"), target_size[0], target_size[1])
-            fitted.save(dest_path, "JPEG", quality=85)
-            processed += 1
-        except Exception:
-            log.exception("Screensaver sync: failed to process %s", src_path)
+            dest_name = os.path.splitext(rel.replace(os.sep, "__"))[0] + ".jpg"
+            dest_path = os.path.join(dest_dir, dest_name)
+            try:
+                with Image.open(src_path) as raw:
+                    fitted = _fit_cover(raw.convert("RGB"), target_size[0], target_size[1])
+                fitted.save(dest_path, "JPEG", quality=85)
+                os.remove(src_path)
+                processed += 1
+            except Exception:
+                log.exception("Screensaver sync: failed to process %s", src_path)
 
     if processed:
-        log.info("Screensaver sync: processed %d new/changed photo(s) into %s", processed, dest_dir)
+        log.info("Screensaver sync: moved %d new photo(s) into %s", processed, dest_dir)
 
 
 def screensaver_sync_loop(source_dir, dest_dir, target_size, interval_s, stop_event):
@@ -843,6 +891,7 @@ def main():
         target=memory_watchdog, args=(min_free_memory_mb, stop_event), name="mem-watchdog", daemon=True
     ).start()
 
+    console_fd = hide_console_cursor()
     fb = Framebuffer(os.environ.get("FB_DEVICE", "/dev/fb0"))
     renderer = Renderer(fb.xres, fb.yres, entities, dark_mode, shopping_list_entity, chores_entities)
     touch = TouchInput(fb.xres, fb.yres)
@@ -920,6 +969,7 @@ def main():
     finally:
         stop_event.set()
         fb.close()
+        restore_console_cursor(console_fd)
 
 
 if __name__ == "__main__":

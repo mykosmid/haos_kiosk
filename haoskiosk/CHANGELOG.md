@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed the blinking Linux console cursor bleeding through on top of the
+  display: the Add-on now switches the console into graphics mode
+  (`KDSETMODE`/`KD_GRAPHICS`) for as long as it's running, restoring text
+  mode on clean shutdown. Requires the `SYS_TTY_CONFIG` capability and
+  access to a console device (`/dev/tty0`, `/dev/console`, or `/dev/tty1`),
+  both now granted by default in this Add-on's configuration.
+
 - Added a screensaver/smart-frame idle mode: after `screensaver_timeout_s`
   (default 60s) of no touch input, the display switches to a full-screen
   clock and date, plus rotating photos from `screensaver_photo_dir` if
@@ -9,11 +16,12 @@
   Assistant state changes do neither - and the first wake tap is consumed
   by dismissing the screensaver rather than also being applied to the
   dashboard underneath. Set `screensaver_timeout_s` to `0` to disable.
-- Added `screensaver_source_dir`: if set, the Add-on automatically mirrors
-  photos from that folder (e.g. a Home Assistant `/media` folder) into
-  `screensaver_photo_dir`, downscaling/center-cropping each one to exactly
-  fill the display's resolution and keeping the two folders in sync on a
-  timer (`screensaver_sync_interval_s`) as photos are added or removed.
+- Added `screensaver_source_dir`: a photo "drop zone" (e.g. a folder under
+  Home Assistant's `/media`) that the Add-on periodically scans
+  (`screensaver_sync_interval_s`) and **moves** each photo out of into
+  `screensaver_photo_dir`, downscaled/center-cropped to exactly fill the
+  display's resolution - the original is deleted once its resized copy is
+  saved, so uploads don't pile up in the source folder.
 
 ## v2.3.0 - July 2026
 
