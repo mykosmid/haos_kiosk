@@ -1,5 +1,36 @@
 # Changelog
 
+## v2.0.0 - July 2026
+
+- **Breaking rewrite**: replaced the entire Xorg + openbox + luakit (WebKit2)
+  browser stack with a small native Python app (`kiosk.py`) that renders
+  directly to the Linux framebuffer (`/dev/fb0`) and reads touch input
+  directly from `/dev/input` via `evdev` - no X server, window manager, or
+  browser engine anywhere in the container. This is a large memory reduction
+  on constrained devices (e.g. a 1GB Raspberry Pi), at the cost of no longer
+  showing the full Lovelace dashboard: the add-on now shows a fixed grid of
+  entities you configure (`entities`), with tap-to-toggle for
+  `light`/`switch`/`input_boolean`/`fan` domains and read-only display for
+  everything else, talking directly to Home Assistant's WebSocket API.
+- **Breaking config change**: `ha_username`/`ha_password` are replaced by
+  `ha_token` (a Home Assistant long-lived access token), since WebSocket
+  authentication requires a token rather than a login form.
+- Removed `ha_dashboard`, `login_delay`, `browser_refresh`, `output_number`,
+  `map_touch_inputs`, `keyboard_layout`, `rotate_display`, `screen_timeout`,
+  and all `screensaver_*` options - these were all specific to the
+  browser-based dashboard/screensaver, which no longer exists in this
+  version. Display rotation and idle dimming/screensaver may return as
+  native features in a future release.
+- `dark_mode` and `debug_mode` are kept but repurposed for the native app
+  (dashboard color palette, and skip-launch-for-manual-debugging
+  respectively); `min_free_memory_mb` keeps its previous meaning, now
+  restarting `kiosk.py` instead of `luakit`.
+- Set `ingress: false` - the add-on has no web UI to embed, so leaving
+  ingress enabled produced a non-functional panel entry.
+- Dropped the `SYS_ADMIN` privilege and the `/dev/tty0` remount/delete hack,
+  `dbus`, and `udev` - all were specific to getting Xorg to start and are
+  unnecessary once there's no X server.
+
 ## v1.4.0 - July 2026
 
 - Added built-in screensaver: after a configurable idle timeout, shows a
@@ -25,6 +56,12 @@
   size limit if this WebKit build ignores `createImageBitmap`'s
   `resizeWidth` option (e.g. for wide panorama photos). The canvas is now
   always capped to the computed target size regardless of bitmap size.
+- Added low-memory watchdog (`min_free_memory_mb`, default 100): on
+  memory-constrained devices (e.g. a 1GB Raspberry Pi), periodically
+  checks available system memory and proactively restarts luakit before
+  the kernel OOM-killer can kill a WebKit process mid-render, which
+  otherwise tends to freeze the display (screen on, page/HA connection
+  dead) rather than recovering on its own. Set to `0` to disable.
 
 ## v1.3.2 - April 2026
 

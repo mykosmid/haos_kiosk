@@ -1,47 +1,44 @@
 # HAOS-kiosk
 
-Display HA dashboards in kiosk mode directly on your HAOS server.
-
-## Author: Jeff Kosowsky (version: 1.3.2, April 2026)
+Display a small, native Home Assistant entity dashboard directly on your HAOS
+server's touchscreen - no browser involved.
 
 ## Description
 
-Launches X-Windows on local HAOS server followed by OpenBox window manager
-and Luakit browser starting with your configured default Home Assistant
-dashboard.
+Renders a compact grid of entity cards straight to the Linux framebuffer
+using a small Python app, and reads touchscreen input directly from
+`/dev/input`. There is no X server, no window manager, and no browser engine
+running at all - just enough software to show a handful of entities and let
+you tap to toggle them. This keeps memory usage far lower than a full
+Home-Assistant-in-a-browser kiosk, which matters a lot on memory-constrained
+devices like a 1GB Raspberry Pi.
 
-- Standard mouse, touchscreen, and keyboard interactions should work
-  automatically as well as audio
-- Supports touchscreens, screen rotation, and onscreen keyboard
+This is a deliberately minimal display: a fixed grid of entities you choose,
+each showing its name and current state. `light`, `switch`, `input_boolean`,
+and `fan` entities can be tapped to toggle; everything else (sensors, binary
+sensors, etc.) is shown read-only. There is no Lovelace, no dashboard editor,
+no graphs, and no scrolling - if you need any of that, this add-on isn't the
+right fit.
 
-
-You can press `ctl-R` at any time to refresh ( reload) the browser. \
-Alternatively, you can right click (or long press touchscreen) to access
-browser menu that includes options for page `Back`, `Forward`, `Stop`, and
-`Reload`.
-
-**NOTE:** You must enter your HA username and password in the
+**NOTE:** You must generate a Home Assistant long-lived access token and
+enter it, along with the entities you want to display, in the
 *Configuration* tab for the Add-on to start.
 
-**NOTE:** The Add-on requires a valid, connected display in order to
-start.\
+**NOTE:** The Add-on requires a valid, connected display in order to start.
 If your display does not show up, try rebooting and restarting the Add-on
-with the display attached
+with the display attached.
 
-**NOTE:** Should support any standard mouse, touchscreen, keypad and
-touchpad so long as its `/dev/input/eventN` number is less than 25.
+**NOTE:** Display rotation and idle/screensaver behavior are not supported
+in this version - the display is expected to be in its normal landscape
+orientation and stays on continuously.
 
 **NOTE:** If you encounter issues with the Add-on, please first check the
 HAOSKiosk github
 [issues page](https://github.com/puterboy/HAOS-kiosk/issues) (open and
-closed), then try the testing branch (add the following url to the
-repository: https://github.com/puterboy/HAOS-kiosk#testing). If still
-please file an
+closed). If still please file an
 [issue on github](https://github.com/puterboy/HAOS-kiosk/issues) and
 \*\*include full details of your setup (including computer hardware and
-display type details)and what you did along with a complete log.
-
-
+display type details) and what you did along with a complete log.
 
 ### If you appreciate my efforts:
 
@@ -65,28 +62,25 @@ ______________________________________________________________________
 2. Click on the Add-on, press **Install** and wait until the Add-on is
    installed.
 
-3. You must enter your HA username and password in the **Configuration**
-   tab.
+3. Generate a long-lived access token: in the Home Assistant web UI, open
+   your user profile (click your name in the bottom-left sidebar), scroll
+   down to **Long-Lived Access Tokens**, and click **Create Token**. Copy it
+   somewhere safe - you won't be able to see it again.
 
-4. Press **Start** to run the Add-on.
+4. In the Add-on's **Configuration** tab, paste that token into **HA
+   Long-Lived Access Token** and list the entities you want to see in
+   **Entities**.
 
-**If you are having trouble installing the add-on or getting displays and
-touchscreens working, please see the **TROUBLESHOOTING** section below as
-well as the github issues page
-(https://github.com/puterboy/HAOS-kiosk/issues) as many common issues have
-already been addressed and resolved**
+5. Press **Start** to run the Add-on.
 
 ______________________________________________________________________
 
 ## Configuration Options
 
-### HA Username [required]
+### HA Long-Lived Access Token [required]
 
-Enter your Home Assistant login name.
-
-### HA Password [required]
-
-Enter your Home Assistant password.
+Long-lived access token for Home Assistant, generated from your user
+profile's "Long-Lived Access Tokens" section.
 
 ### HA URL
 
@@ -94,218 +88,43 @@ Default: `http://localhost:8123`\
 In general, you shouldn't need to change this since this is running on the
 local server.
 
-### HA Dashboard
+### Entities [required]
 
-Name of starting dashboard.\
-(Default: "" - loads the default `Lovelace` dashboard)
-
-### Login Delay
-
-Delay in seconds to allow login page to load.\
-(Default: 1 second)
-
-### Zoom Level
-
-Level of zoom with `100` being 100%.\
-(Default: 100%)
-
-### Browser Refresh
-
-Time between browser refreshes. Set to `0` to disable.\
-Recommended because with the default RPi config, console errors *may*
-overwrite the dashboard.\
-(Default: 600 seconds)
-
-### Screen Timeout
-
-Time before screen blanks in seconds. Set to `0` to never timeout.
-(Default: 0 seconds - never timeout)
-
-### Output Number
-
-Choose which of the *connected* video output ports to use. Set to `1` to
-use the first connected port. If selected number exceeds number of
-connected ports, then use last valid connected port. (Default: 1)
-
-NOTE: This should always be set to `1` unless you have more than one video
-output device connected. If so, use the logs to see how they are numbered.
+Comma-separated list of entity_ids to display, e.g.
+`light.living_room,switch.fan,sensor.temperature`. Shown in the order
+listed. `light`, `switch`, `input_boolean`, and `fan` entities can be tapped
+to toggle; anything else is shown read-only.
 
 ### Dark Mode
 
-Prefer dark mode where supported if `True`, otherwise prefer light mode.
-(Default: True). This preference applies to all URLs
-
-NOTE: This preference applies to all URLs unless overridden in the URL. In
-particular, in Home Assistant web pages, This preference for light or dark
-mode only takes effect if the user profile (under 'Theme') is set to
-`auto`. Otherwise, the user profile `light` or `dark` setting takes
-precedence. Similarly, the `Primary` and `Accent` colors set in the profile
-take precedence *unless* `HA Theme` is set.
-
-### HA Theme
-
-Set HA theme to given string. This setting applies only to HA dashboards
-and may override the value of DARK_MODE unless the theme support both dark
-and light variants. See HACS for downloadable themes to use. (Default:
-True)
-
-NOTE: You can force the dark or light default theme specifically for HA
-dashboards by setting the theme to `{"dark":true}` or `{"dark":false}`
-respectively. Similarly, leaving the theme blank (or setting it to `{}` or
-`Home Assistant`) is equivalent to "auto", in which case the default light
-or dark scheme is governed by the value of DARK_MODE.
-
-### HA Sidebar
-
-Presentation of left sidebar menu (device-specific).\
-Options include: (Default: None)
-
-- Full (icons + names)
-- Narrow (icons only)
-- None (hidden)
-
-### Rotate Display
-
-Rotate the display relative to standard view.\
-Options include: (Default: Normal)
-
-- Normal (No rotation)
-- Left (Rotate 90 degrees clockwise)
-- Right (Rotate 90 degrees counter-clockwise)
-- Inverted (Rotate 180 degrees)
-
-### Map Touch Inputs
-
-Map touch inputs to the selected video output, so that the touch devices
-get rotated consistently with the video output. (Default: True)
-
-### Cursor Timeout
-
-Time in seconds for cursor to be hidden after last mouse movement or touch.
-Cursor will reappear when mouse moved or screen touched again. Set to `0`
-to *always* show cursor. Set to `-1` to *never* show cursor. (Default: 5
-seconds)
-
-### Keyboard Layout
-
-Set the keyboard layout and language. (Default: us)
-
-### Xorg.conf
-
-Append to or replace existing, default xorg.conf file.\
-Select 'Append' or 'Replace options.\
-To restore default, set to empty and select 'Append' option.
+Use a dark color scheme for the dashboard if `True`, otherwise light.
+(Default: True)
 
 ### Debug
 
-For debugging purposes, launches `Xorg` and `openbox` and then sleeps
-without launching `luakit`.\
-Manually, launch `luakit` (e.g.,
-`luakit -U localhost:8123/<your-dashboard>`) from Docker container.\
+For debugging purposes, sleeps without launching the kiosk display.
+Manually launch it (e.g., `python3 /kiosk.py`) from Docker container.\
 E.g., `sudo docker exec -it addon_haoskiosk bash`
 
-### Screensaver Enabled
+### Minimum Free Memory (MB)
 
-If `True`, shows a fullscreen image slideshow after the dashboard has been
-idle (no touch, mouse, or key input) for **Screensaver Timeout** seconds.
-Any input dismisses the slideshow and returns to the dashboard. (Default:
-False)
+On memory-constrained devices (e.g. a 1GB Raspberry Pi), the kernel's
+OOM-killer can silently kill the display process under memory pressure,
+leaving the kiosk frozen rather than recovering on its own.
 
-Images are pulled live from Home Assistant's built-in local **Media**
-source, so you can upload/replace them remotely at any time from the
-Home Assistant mobile app or web UI (sidebar **Media** page), without
-touching the kiosk device or restarting the Add-on.
-
-### Screensaver Timeout
-
-Idle time in seconds before the screensaver starts. (Default: 300)
-
-### Screensaver Interval
-
-Time in seconds between images shown in the slideshow. (Default: 15)
-
-### Screensaver Media Folder
-
-Path (relative to Home Assistant's "My media" / local Media source root,
-i.e. `/media` on the HA host) that the kiosk slideshow reads images from.
-Leave blank to use the "My media" root itself. Otherwise set it to a
-subfolder name/path, e.g. `photos/frame` maps to `/media/photos/frame`.
-(Default: "screensaver")
-
-If **Screensaver Source Folder** is left blank (its default), upload
-images directly into this folder via the Media page in the HA app or web
-UI — subfolders are created automatically the first time you upload a
-file into them.
-
-### Screensaver Source Folder
-
-Path (relative to "My media") to watch for images to automatically
-resize and copy into **Screensaver Media Folder**. Leave blank to watch
-the "My media" root itself — this is the recommended setup: upload your
-original photos straight to "My media" (no resizing needed on your end)
-and the Add-on resizes/copies them into the Screensaver Media Folder for
-you. Must not be the same folder as Screensaver Media Folder. (Default:
-"")
-
-### Screensaver Resize Width / Screensaver Resize Height
-
-Maximum dimensions (in pixels) for images auto-resized by Screensaver
-Source Folder. Aspect ratio is preserved and images are never upscaled —
-only large originals (e.g. full-resolution phone photos) are shrunk, which
-keeps memory/CPU use low on the kiosk device. (Default: 1920 x 1080)
-
-______________________________________________________________________
-
-## KEYBOARD SHORTCUTS
-
-The following new fixed keyboard shortcuts are defined (but subject to
-change).
-
-- **Ctrl+r:** *Reload page*
-
-- **Ctrl+Left:** *Go back in the browser tab history*
-
-- **Ctrl+Right:** *Go forward in the browser tab history*
-
-- **Ctrl+Alt+t:** *Open new tab*
-
-- **Ctrl+Alt+Shift+t:** *Close current tab*
-
-- **Ctrl+Alt+w:** *Open new window*
-
-- **Ctrl+Alt+Shift+w:** *Close current window* (except for last window)
-
-- **Ctl+Alt+Left:** *Previous tab*
-
-- **Ctl+Alt+Right:** *Next tab*
-
-- **Ctl+Alt+Shift+Left:** *Previous window* (Also: **Alt+Shift+Tab**)
-
-- **Ctl+Alt+Shift+Right:** *Next window* (Also: **Alt+Tab**)
-
-Note that the Openbox Window manager defines many other default bindings.
+To avoid this, the Add-on checks available system memory every 20 seconds
+and proactively restarts the display (a clean, few-second restart) if it
+drops below this threshold. Set to `0` to disable. (Default: 100)
 
 ______________________________________________________________________
 
 ## MISCELLANEOUS NOTES
 
-#### Luakit browser
-
-The Luakit browser is launched in kiosk-like (*passthrough*) mode. In
-general, you want to stay in `passthrough` mode to preserve the kiosk-like
-experience and pass all keystrokes to the browser page (except for explicit
-bindings as defined above)
-
-Luakit modes and commands are similar to vi
-
-- To enter *normal* mode (similar to command mode in `vi`), press
-  `ctl-alt-esc`.
-
-- To return to *passthrough* mode, press `ctl-Z` or alternatively, press
-  `i` to enter *insert*
-
-See [luakit documentation](https://wiki.archlinux.org/title/Luakit) for
-further usage information and available commands.
+This add-on intentionally has no browser, no window manager, and no
+Lovelace frontend anywhere in its stack. If you need the full Home
+Assistant dashboard experience (multiple views, graphs, a dashboard editor,
+etc.) on a kiosk display, look at a browser-based kiosk add-on instead -
+this project trades that flexibility for a much smaller memory footprint.
 
 ______________________________________________________________________
 

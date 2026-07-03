@@ -1,92 +1,38 @@
 ---
 configuration:
-  ha_username:
-    name: "HA Username"
-    description: "Home Assistant login user name [Required]"
-  ha_password:
-    name: "HA Password"
-    description: "Home Assistant login password [Required]"
+  ha_token:
+    name: "HA Long-Lived Access Token"
+    description: |
+      Long-lived access token for Home Assistant [Required]. Generate one
+      from your HA user profile (bottom of the page, "Long-Lived Access
+      Tokens" section, "Create Token").
   ha_url:
     name: "HA URL"
     description: |
       Base URL for HA [Default: http://localhost:8123]
-  ha_dashboard:
-    name: "HA Dashboard"
-    description: 'Dashboard path (following "HA URL") [Default: ""]'
-  login_delay:
-    name: "Login Delay"
+  entities:
+    name: "Entities"
     description: |
-      Time to wait for login page to load in seconds [Default: 1.0]
-      Note: Often can set to '0'
-  browser_refresh:
-    name: "Browser Refresh"
+      Comma-separated list of entity_ids to display, e.g.
+      "light.living_room,switch.fan,sensor.temperature" [Required]. Order
+      shown matches the order listed here. light/switch/input_boolean/fan
+      entities can be tapped to toggle; everything else is shown read-only.
+  dark_mode:
+    name: "Dark Mode"
     description: |
-      Browser refresh interval in seconds; 0 for never [Default: 600]
-  screen_timeout:
-    name: "Screen Timeout"
-    description: "Time in seconds until screen blanks; 0 for never [Default: 0]"
-  output_number:
-    name: "Output Number"
-    description: |
-      Choose which of the *connected* video output ports to use.
-      Set to 1 to use the first connected port. [Default: 1]
-  rotate_display:
-    name: "Rotate Display"
-    description: "Rotate display [Default: Normal]"
-    items:
-      normal: "Normal (no rotation)"
-      left: "Left (90deg CCW)"
-      right: "Right (90deg CW)"
-      inverted: "Inverted (180deg)"
-  map_touch_inputs:
-    name: "Map Touch Inputs"
-    description: |
-      If 'True', then map all touch pointer inputs to the selected
-      video output. [Default: True]
-  keyboard_layout:
-    name: "Keyboard Layout"
-    description: "Set the keyboard layout and language [Default: us]"
+      Use a dark color scheme for the dashboard if 'True', otherwise light.
+      [Default: True]
   debug_mode:
     name: "Debug Mode"
     description: |
-      Launch X but not browser. [Default: False]
-      Manually access using: docker exec -it addon_haoskiosk bash
-  screensaver_enabled:
-    name: "Screensaver Enabled"
+      For debugging purposes, sleeps without launching the kiosk display.
+      [Default: False]
+      Manually launch it (e.g., `python3 /kiosk.py`) from the Docker
+      container. E.g., `sudo docker exec -it addon_haoskiosk bash`
+  min_free_memory_mb:
+    name: "Minimum Free Memory (MB)"
     description: |
-      Show a fullscreen image slideshow after a period of inactivity, using
-      images from Home Assistant's local Media folder. Any touch, mouse or
-      key input dismisses it. [Default: False]
-  screensaver_timeout:
-    name: "Screensaver Timeout"
-    description: "Idle time in seconds before the screensaver starts [Default: 300]"
-  screensaver_interval:
-    name: "Screensaver Interval"
-    description: "Time in seconds between images in the slideshow [Default: 15]"
-  screensaver_media_folder:
-    name: "Screensaver Media Folder"
-    description: |
-      Path (relative to Home Assistant's "My media" / local Media root)
-      that the kiosk slideshow reads images from, e.g. "photos/frame".
-      Leave blank to use the "My media" root itself. If Screensaver Source
-      Folder is also set, this folder is auto-populated with resized
-      copies rather than uploaded to directly. [Default: "screensaver"]
-  screensaver_source_folder:
-    name: "Screensaver Source Folder"
-    description: |
-      Path (relative to Home Assistant's "My media" / local Media root)
-      to watch for images to auto-resize into Screensaver Media Folder.
-      Leave blank to watch the "My media" root itself - upload your
-      original photos there via the HA app or web UI and they'll be
-      resized and copied automatically. Must differ from Screensaver
-      Media Folder. [Default: ""]
-  screensaver_resize_width:
-    name: "Screensaver Resize Width"
-    description: |
-      Max width in pixels for auto-resized screensaver images (aspect
-      ratio preserved, never upscaled) [Default: 1920]
-  screensaver_resize_height:
-    name: "Screensaver Resize Height"
-    description: |
-      Max height in pixels for auto-resized screensaver images (aspect
-      ratio preserved, never upscaled) [Default: 1080]
+      If available system memory drops below this many MB, proactively
+      restart the kiosk display rather than risk the kernel OOM-killer
+      freezing it on memory-constrained devices. Set to 0 to disable.
+      [Default: 100]

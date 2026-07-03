@@ -1,7 +1,7 @@
 ---
 name: "HAOS Kiosk Display"
-description: "Minimal Xorg + luakit browser kiosk for Home Assistant touchscreen display"
-version: "1.4.0"
+description: "Minimal native framebuffer kiosk for Home Assistant touchscreen display"
+version: "2.0.0"
 slug: "haoskiosk"
 url: https://github.com/mykosmid/haos_kiosk/tree/main/haoskiosk
 
@@ -15,7 +15,7 @@ arch:
 startup: application
 host_network: true
 init: false
-ingress: true
+ingress: false
 homeassistant_api: true
 auth_api: true
 usb: true
@@ -26,9 +26,7 @@ ulimits:
     hard: 65536
 
 devices:
-  - /dev/dri/card0
-  - /dev/dri/card1
-  - /dev/dri/renderD128
+  - /dev/fb0
   - /dev/input/event0
   - /dev/input/event1
   - /dev/input/event2
@@ -58,53 +56,21 @@ devices:
 
 map:
   - addon_config:rw
-  - media:rw
-
-privileged:
-  - SYS_ADMIN
 
 options:
   ha_url: "http://localhost:8123"
-  ha_dashboard: ""
-  login_delay: 1.0
-  browser_refresh: 600
-  screen_timeout: 0
-  output_number: 1
-  rotate_display: "normal"
-  map_touch_inputs: true
-  keyboard_layout: us
+  entities: ""
+  dark_mode: true
   debug_mode: false
-  screensaver_enabled: false
-  screensaver_timeout: 300
-  screensaver_interval: 15
-  screensaver_media_folder: "screensaver"
-  screensaver_source_folder: ""
-  screensaver_resize_width: 1920
-  screensaver_resize_height: 1080
+  min_free_memory_mb: 100
 
 schema:
-  ha_username: str
-  ha_password: password
+  ha_token: password
   ha_url: str
-  ha_dashboard: str?
-  login_delay: float(0,)
-  browser_refresh: int(0,)
-  screen_timeout: int(0,)
-  output_number: int(1,2)
-  rotate_display: list(normal|left|right|inverted)
-  map_touch_inputs: bool
-  keyboard_layout: str
+  entities: str
+  dark_mode: bool
   debug_mode: bool
-  screensaver_enabled: bool
-  screensaver_timeout: int(1,)
-  screensaver_interval: int(1,)
-  screensaver_media_folder: str
-  screensaver_source_folder: str
-  screensaver_resize_width: int(1,)
-  screensaver_resize_height: int(1,)
+  min_free_memory_mb: int(0,)
 
 translations:
   - en
-
-environment:
-  DISPLAY: ":0"
