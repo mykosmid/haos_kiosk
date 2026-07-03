@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.1.0 - July 2026
+
+- Added a read-only shopping list widget (`shopping_list_entity`, default
+  `todo.shopping_list`) in the bottom-right corner of the entity grid,
+  pulled live from a Home Assistant `todo` list over the existing WebSocket
+  connection. Entities flow around the reserved corner cell automatically.
+  Set the option to `none` to hide the widget.
+
 ## v2.0.0 - July 2026
 
 - **Breaking rewrite**: replaced the entire Xorg + openbox + luakit (WebKit2)

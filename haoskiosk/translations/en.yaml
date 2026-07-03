@@ -17,6 +17,14 @@ configuration:
       "light.living_room,switch.fan,sensor.temperature" [Required]. Order
       shown matches the order listed here. light/switch/input_boolean/fan
       entities can be tapped to toggle; everything else is shown read-only.
+  shopping_list_entity:
+    name: "Shopping List Entity"
+    description: |
+      Entity ID of a Home Assistant 'todo' list to show as a read-only
+      widget in the bottom-right corner of the display, e.g.
+      "todo.shopping_list" (the built-in Shopping List integration's
+      default entity). Set to "none" to hide the widget entirely.
+      [Default: todo.shopping_list]
   dark_mode:
     name: "Dark Mode"
     description: |

@@ -17,19 +17,22 @@ log = logging.getLogger("ha_client")
 
 
 class HAClient:
-    def __init__(self, url, token, entity_ids, on_update=None):
+    def __init__(self, url, token, entity_ids, todo_entity_id=None, on_update=None):
         self._ws_url = _to_ws_url(url)
         self._token = token
         self._entity_ids = set(entity_ids)
+        self._todo_entity_id = todo_entity_id or None
         self._on_update = on_update  # callback(entity_id), invoked from the asyncio thread
 
         self.lock = threading.Lock()
         self.states = {}  # entity_id -> HA state dict
+        self.todo_items = []  # list of {"uid", "summary", "status"} dicts for _todo_entity_id
         self.connected = threading.Event()
 
         self._loop = None
         self._ws = None
         self._msg_id = 0
+        self._pending = {}  # req_id -> asyncio.Future, for requests awaited during the event loop
         self._thread = threading.Thread(target=self._run_loop, name="ha-client", daemon=True)
 
     def start(self):
@@ -40,6 +43,10 @@ class HAClient:
     def get_state(self, entity_id):
         with self.lock:
             return self.states.get(entity_id)
+
+    def get_todo_items(self):
+        with self.lock:
+            return list(self.todo_items)
 
     def call_service(self, domain, service, entity_id):
         if self._loop is None:
@@ -76,6 +83,8 @@ class HAClient:
             self._msg_id = 0
             await self._authenticate(ws)
             await self._seed_states(ws)
+            if self._todo_entity_id:
+                await self._seed_todo_items(ws)
             await ws.send(json.dumps({
                 "id": self._next_id(),
                 "type": "subscribe_events",
@@ -115,7 +124,52 @@ class HAClient:
                 log.warning("Entities not found in Home Assistant: %s", ", ".join(sorted(missing)))
             return
 
+    async def _seed_todo_items(self, ws):
+        req_id = self._next_id()
+        await ws.send(json.dumps({"id": req_id, "type": "todo/item/list", "entity_id": self._todo_entity_id}))
+        while True:
+            resp = json.loads(await ws.recv())
+            if resp.get("id") != req_id:
+                continue  # ignore unrelated messages that might arrive first
+            if not resp.get("success"):
+                log.warning("todo/item/list failed for %s: %s", self._todo_entity_id, resp)
+                return
+            with self.lock:
+                self.todo_items = resp["result"]["items"]
+            return
+
+    async def _refresh_todo_items(self):
+        if self._ws is None:
+            return
+        try:
+            req_id = self._next_id()
+            fut = self._loop.create_future()
+            self._pending[req_id] = fut
+            await self._ws.send(json.dumps({
+                "id": req_id, "type": "todo/item/list", "entity_id": self._todo_entity_id,
+            }))
+            resp = await fut
+            if not resp.get("success"):
+                log.warning("todo/item/list failed for %s: %s", self._todo_entity_id, resp)
+                return
+            with self.lock:
+                self.todo_items = resp["result"]["items"]
+            if self._on_update:
+                try:
+                    self._on_update(self._todo_entity_id)
+                except Exception:
+                    log.exception("on_update callback failed for %s", self._todo_entity_id)
+        except Exception:
+            log.exception("Failed to refresh todo items for %s", self._todo_entity_id)
+        finally:
+            self._pending.pop(req_id, None)
+
     def _handle_message(self, msg):
+        if msg.get("type") == "result":
+            fut = self._pending.get(msg.get("id"))
+            if fut and not fut.done():
+                fut.set_result(msg)
+            return
         if msg.get("type") != "event":
             return
         event = msg.get("event", {})
@@ -124,6 +178,11 @@ class HAClient:
         data = event.get("data", {})
         entity_id = data.get("entity_id")
         new_state = data.get("new_state")
+        if entity_id == self._todo_entity_id:
+            # The todo entity's state is just an item count, not useful on its
+            # own - refetch the full item list whenever it changes.
+            asyncio.create_task(self._refresh_todo_items())
+            return
         if entity_id not in self._entity_ids or new_state is None:
             return
         with self.lock:

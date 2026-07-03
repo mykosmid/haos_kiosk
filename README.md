@@ -20,6 +20,11 @@ sensors, etc.) is shown read-only. There is no Lovelace, no dashboard editor,
 no graphs, and no scrolling - if you need any of that, this add-on isn't the
 right fit.
 
+A read-only shopping list widget can also be shown in the bottom-right
+corner of the grid, pulled live from a Home Assistant `todo` list (e.g. the
+built-in Shopping List integration). It is enabled by default and shown
+regardless of how many entities you configure.
+
 **NOTE:** You must generate a Home Assistant long-lived access token and
 enter it, along with the entities you want to display, in the
 *Configuration* tab for the Add-on to start.
@@ -94,6 +99,14 @@ Comma-separated list of entity_ids to display, e.g.
 `light.living_room,switch.fan,sensor.temperature`. Shown in the order
 listed. `light`, `switch`, `input_boolean`, and `fan` entities can be tapped
 to toggle; anything else is shown read-only.
+
+### Shopping List Entity
+
+Entity ID of a Home Assistant `todo` list to show as a read-only widget in
+the bottom-right corner of the display, e.g. `todo.shopping_list` (the
+built-in Shopping List integration's default entity). Only items not yet
+marked complete are shown. Set to `none` to hide the widget.
+(Default: `todo.shopping_list`)
 
 ### Dark Mode
 

@@ -1,6 +1,7 @@
 """Native, browser-free Home Assistant kiosk display.
 
-Renders a small grid of entity cards directly to the Linux framebuffer
+Renders a small grid of entity cards (plus an optional read-only shopping
+list widget in the bottom-right corner) directly to the Linux framebuffer
 (/dev/fb0) using Pillow, reads touch input directly from /dev/input/eventN
 via evdev, and talks to Home Assistant over its WebSocket API (ha_client.py)
 for state and tap-to-toggle control. No X11/GTK/WebKit anywhere in this
@@ -210,15 +211,23 @@ def _pack_rgb565(rgb_bytes):
 # ---------------------------------------------------------------------------
 
 class Renderer:
-    def __init__(self, width, height, entity_ids, dark_mode):
+    def __init__(self, width, height, entity_ids, dark_mode, shopping_list_entity=None):
         self.width = width
         self.height = height
         self.entity_ids = entity_ids
+        self.shopping_list_entity = shopping_list_entity
         self.palette = PALETTE_DARK if dark_mode else PALETTE_LIGHT
         self.font_name = _load_font(FONT_CANDIDATES, 22)
         self.font_state = _load_font(FONT_BOLD_CANDIDATES + FONT_CANDIDATES, 30)
-        self.cols = 3 if len(entity_ids) > 6 else 2
-        self.rows = math.ceil(len(entity_ids) / self.cols)
+        self.font_small = _load_font(FONT_CANDIDATES, 18)
+
+        total_slots = len(entity_ids) + (1 if shopping_list_entity else 0)
+        self.cols = 3 if total_slots > 6 else 2
+        self.rows = math.ceil(total_slots / self.cols)
+        # The shopping list widget always occupies the bottom-right cell of
+        # the grid, regardless of how many entities there are - entities fill
+        # the remaining cells in order, skipping over this one.
+        self.reserved_index = self.rows * self.cols - 1
 
     def render(self, client):
         img = Image.new("RGB", (self.width, self.height), self.palette["bg"])
@@ -227,10 +236,12 @@ class Renderer:
         cell_w = self.width // self.cols
         cell_h = self.height // self.rows
 
-        for i, entity_id in enumerate(self.entity_ids):
-            row, col = divmod(i, self.cols)
-            x0, y0 = col * cell_w + CARD_MARGIN, row * cell_h + CARD_MARGIN
-            x1, y1 = (col + 1) * cell_w - CARD_MARGIN, (row + 1) * cell_h - CARD_MARGIN
+        cell_index = 0
+        for entity_id in self.entity_ids:
+            if self.shopping_list_entity and cell_index == self.reserved_index:
+                cell_index += 1
+            rect = self._cell_rect(cell_index, cell_w, cell_h)
+            x0, y0, x1, y1 = rect
 
             state = client.get_state(entity_id)
             domain = entity_id.split(".", 1)[0]
@@ -250,9 +261,44 @@ class Renderer:
                 fill=self.palette["accent"] if is_on else self.palette["text"],
             )
 
-            cards.append(Card(rect=(x0, y0, x1, y1), entity_id=entity_id, domain=domain))
+            cards.append(Card(rect=rect, entity_id=entity_id, domain=domain))
+            cell_index += 1
+
+        if self.shopping_list_entity:
+            self._draw_shopping_list(draw, self._cell_rect(self.reserved_index, cell_w, cell_h), client)
 
         return img, cards
+
+    def _cell_rect(self, cell_index, cell_w, cell_h):
+        row, col = divmod(cell_index, self.cols)
+        x0, y0 = col * cell_w + CARD_MARGIN, row * cell_h + CARD_MARGIN
+        x1, y1 = (col + 1) * cell_w - CARD_MARGIN, (row + 1) * cell_h - CARD_MARGIN
+        return x0, y0, x1, y1
+
+    def _draw_shopping_list(self, draw, rect, client):
+        x0, y0, x1, y1 = rect
+        draw.rounded_rectangle([x0, y0, x1, y1], radius=14, fill=self.palette["card"])
+        draw.text((x0 + 16, y0 + 14), "Shopping List", font=self.font_name, fill=self.palette["text"])
+
+        items = [item for item in client.get_todo_items() if item.get("status") != "completed"]
+        line_height = 26
+        y = y0 + 50
+        max_lines = max(0, (y1 - 12 - y) // line_height)
+        visible, overflow = items[:max_lines], max(0, len(items) - max_lines)
+        if overflow and visible:
+            # Reserve the last visible line for the "+N more" count instead of
+            # a full item, so it's never drawn past the widget's bottom edge.
+            visible, overflow = items[:max_lines - 1], len(items) - (max_lines - 1)
+
+        for item in visible:
+            text = _truncate_text(draw, item.get("summary", ""), self.font_small, (x1 - 16) - (x0 + 16))
+            draw.text((x0 + 16, y), f"• {text}", font=self.font_small, fill=self.palette["text"])
+            y += line_height
+
+        if not items:
+            draw.text((x0 + 16, y), "(empty)", font=self.font_small, fill=self.palette["text"])
+        elif overflow:
+            draw.text((x0 + 16, y), f"+{overflow} more", font=self.font_small, fill=self.palette["accent"])
 
 
 def _friendly_name(state, entity_id):
@@ -269,6 +315,14 @@ def _format_state(state):
     value = state.get("state", "unknown")
     unit = state.get("attributes", {}).get("unit_of_measurement")
     return f"{value} {unit}" if unit else value
+
+
+def _truncate_text(draw, text, font, max_width):
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+    while text and draw.textlength(text + "…", font=font) > max_width:
+        text = text[:-1]
+    return text + "…" if text else "…"
 
 
 def _load_font(candidates, size):
@@ -433,6 +487,9 @@ def main():
     entities = [e.strip() for e in os.environ.get("ENTITIES", "").split(",") if e.strip()]
     dark_mode = os.environ.get("DARK_MODE", "true").strip().lower() == "true"
     min_free_memory_mb = int(os.environ.get("MIN_FREE_MEMORY_MB", "100") or 0)
+    shopping_list_entity = os.environ.get("SHOPPING_LIST_ENTITY", "todo.shopping_list").strip()
+    if shopping_list_entity.lower() in ("", "none"):
+        shopping_list_entity = None
 
     if not ha_token:
         log.error("HA_TOKEN is not set - cannot authenticate to Home Assistant")
@@ -442,6 +499,8 @@ def main():
         sys.exit(1)
 
     log.info("Entities: %s", ", ".join(entities))
+    if shopping_list_entity:
+        log.info("Shopping list widget: %s", shopping_list_entity)
 
     stop_event = threading.Event()
     threading.Thread(
@@ -449,13 +508,16 @@ def main():
     ).start()
 
     fb = Framebuffer(os.environ.get("FB_DEVICE", "/dev/fb0"))
-    renderer = Renderer(fb.xres, fb.yres, entities, dark_mode)
+    renderer = Renderer(fb.xres, fb.yres, entities, dark_mode, shopping_list_entity)
     touch = TouchInput(fb.xres, fb.yres)
 
     dirty = threading.Event()
     dirty.set()  # draw once immediately
 
-    client = HAClient(ha_url, ha_token, entities, on_update=lambda _entity_id: dirty.set())
+    client = HAClient(
+        ha_url, ha_token, entities, todo_entity_id=shopping_list_entity,
+        on_update=lambda _entity_id: dirty.set(),
+    )
     client.start()
 
     last_cards = []

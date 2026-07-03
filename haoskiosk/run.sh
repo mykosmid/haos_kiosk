@@ -48,6 +48,7 @@ load_config_var() {
 load_config_var HA_URL "http://localhost:8123"
 load_config_var HA_TOKEN "" 1
 load_config_var ENTITIES ""
+load_config_var SHOPPING_LIST_ENTITY "todo.shopping_list"
 load_config_var DARK_MODE true
 load_config_var DEBUG_MODE false
 load_config_var MIN_FREE_MEMORY_MB 100
