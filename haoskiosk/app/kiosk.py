@@ -441,6 +441,110 @@ def _truncate_text(draw, text, font, max_width):
     return text + "…" if text else "…"
 
 
+def _fit_cover(image, width, height):
+    """Scale an image to fully cover a width x height box (upscaling if
+    needed) and center-crop the overflow, like CSS 'background-size: cover'.
+    """
+    src_w, src_h = image.size
+    scale = max(width / src_w, height / src_h)
+    new_w, new_h = max(1, round(src_w * scale)), max(1, round(src_h * scale))
+    resized = image.resize((new_w, new_h), Image.LANCZOS)
+    left = (new_w - width) // 2
+    top = (new_h - height) // 2
+    return resized.crop((left, top, left + width, top + height))
+
+
+# ---------------------------------------------------------------------------
+# Screensaver ("smart frame" idle mode)
+# ---------------------------------------------------------------------------
+
+class Screensaver:
+    """Full-screen idle display: rotates local photos (if configured) with a
+    clock/date overlay, or just the clock/date on a black background if no
+    photos are available. Photo selection and rotation are both derived
+    purely from the wall clock (current time // photo_interval_s), so the
+    render is stateless across activations - no need to track "when did this
+    screensaver session start"."""
+
+    def __init__(self, width, height, photo_dir, photo_interval_s):
+        self.width = width
+        self.height = height
+        self.photo_interval_s = max(5, photo_interval_s)
+        self.font_clock = _load_font(FONT_BOLD_CANDIDATES + FONT_CANDIDATES, 90)
+        self.font_date = _load_font(FONT_CANDIDATES, 32)
+        self._photos = self._scan_photos(photo_dir)
+        self._cache_index = None
+        self._cache_img = None
+
+        if photo_dir and not self._photos:
+            log.warning("Screensaver photo dir %s has no usable images; showing clock only", photo_dir)
+        elif self._photos:
+            log.info("Screensaver: %d photo(s) found in %s", len(self._photos), photo_dir)
+
+    def redraw_key(self, now):
+        """A cheap-to-compare value that changes exactly when the rendered
+        frame should change (the displayed minute, and/or the photo slot)."""
+        photo_slot = int(now // self.photo_interval_s) % len(self._photos) if self._photos else 0
+        return (time.strftime("%H:%M"), photo_slot)
+
+    def render(self, now):
+        img = Image.new("RGB", (self.width, self.height), (0, 0, 0))
+        if self._photos:
+            slot = int(now // self.photo_interval_s) % len(self._photos)
+            photo = self._load_photo(slot)
+            if photo is not None:
+                img.paste(photo, (0, 0))
+        self._draw_clock(img)
+        return img
+
+    def _scan_photos(self, photo_dir):
+        if not photo_dir:
+            return []
+        try:
+            names = sorted(
+                name for name in os.listdir(photo_dir)
+                if name.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".gif"))
+            )
+        except OSError as exc:
+            log.warning("Could not read screensaver photo dir %s: %s", photo_dir, exc)
+            return []
+        return [os.path.join(photo_dir, name) for name in names]
+
+    def _load_photo(self, index):
+        if index == self._cache_index:
+            return self._cache_img
+        path = self._photos[index]
+        try:
+            with Image.open(path) as raw:
+                fitted = _fit_cover(raw.convert("RGB"), self.width, self.height)
+        except Exception:
+            log.exception("Failed to load screensaver photo %s", path)
+            fitted = None
+        self._cache_index, self._cache_img = index, fitted
+        return fitted
+
+    def _draw_clock(self, img):
+        draw = ImageDraw.Draw(img)
+        clock_text = time.strftime("%H:%M")
+        date_text = time.strftime(f"%A, %B {int(time.strftime('%d'))}")
+
+        pad = 24
+        margin = 32
+        line_gap = 8
+        clock_w = draw.textlength(clock_text, font=self.font_clock)
+        date_w = draw.textlength(date_text, font=self.font_date)
+        box_w = max(clock_w, date_w) + pad * 2
+        box_h = 90 + 32 + line_gap + pad * 2
+
+        x0, y0 = margin, self.height - margin - box_h
+        x1, y1 = x0 + box_w, self.height - margin
+        draw.rounded_rectangle([x0, y0, x1, y1], radius=18, fill=(0, 0, 0))
+        draw.text((x0 + pad, y0 + pad), clock_text, font=self.font_clock, fill=(255, 255, 255))
+        draw.text(
+            (x0 + pad, y0 + pad + 90 + line_gap), date_text, font=self.font_date, fill=(220, 220, 220),
+        )
+
+
 def _load_font(candidates, size):
     for path in candidates:
         if not path:
@@ -451,6 +555,76 @@ def _load_font(candidates, size):
             continue
     log.warning("No TrueType font found (tried: %s); falling back to a tiny built-in bitmap font", candidates)
     return ImageFont.load_default()
+
+
+# ---------------------------------------------------------------------------
+# Screensaver photo sync (mirrors + downscales a source media folder)
+# ---------------------------------------------------------------------------
+
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".gif")
+
+
+def sync_screensaver_photos(source_dir, dest_dir, target_size):
+    """Mirrors image files from source_dir (recursively) into dest_dir as
+    JPEGs downscaled/cropped to target_size (the screen's own resolution),
+    so the screensaver never has to decode or resize a full-resolution photo
+    at render time. Skips files whose resized copy is already up to date
+    (by mtime) and removes resized copies whose source no longer exists, so
+    it's cheap to re-run on a timer and just picks up whatever changed in
+    the source folder."""
+    if not os.path.isdir(source_dir):
+        log.warning("Screensaver sync: source dir %s does not exist - skipping sync", source_dir)
+        return
+
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+    except OSError:
+        log.exception("Screensaver sync: could not create destination dir %s", dest_dir)
+        return
+
+    sources = {}
+    for root, _dirs, names in os.walk(source_dir):
+        for name in names:
+            if not name.lower().endswith(IMAGE_EXTS):
+                continue
+            src_path = os.path.join(root, name)
+            rel = os.path.relpath(src_path, source_dir)
+            dest_name = rel.replace(os.sep, "__")
+            sources[os.path.splitext(dest_name)[0] + ".jpg"] = src_path
+
+    existing = set(os.listdir(dest_dir))
+    for stale_name in existing - sources.keys():
+        try:
+            os.remove(os.path.join(dest_dir, stale_name))
+            log.info("Screensaver sync: removed stale copy %s", stale_name)
+        except OSError:
+            log.exception("Screensaver sync: failed to remove stale copy %s", stale_name)
+
+    processed = 0
+    for dest_name, src_path in sources.items():
+        dest_path = os.path.join(dest_dir, dest_name)
+        try:
+            if os.path.exists(dest_path) and os.path.getmtime(dest_path) >= os.path.getmtime(src_path):
+                continue
+            with Image.open(src_path) as raw:
+                fitted = _fit_cover(raw.convert("RGB"), target_size[0], target_size[1])
+            fitted.save(dest_path, "JPEG", quality=85)
+            processed += 1
+        except Exception:
+            log.exception("Screensaver sync: failed to process %s", src_path)
+
+    if processed:
+        log.info("Screensaver sync: processed %d new/changed photo(s) into %s", processed, dest_dir)
+
+
+def screensaver_sync_loop(source_dir, dest_dir, target_size, interval_s, stop_event):
+    while True:
+        try:
+            sync_screensaver_photos(source_dir, dest_dir, target_size)
+        except Exception:
+            log.exception("Screensaver sync failed")
+        if stop_event.wait(interval_s):
+            return
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +803,11 @@ def main():
     entities = [e.strip() for e in os.environ.get("ENTITIES", "").split(",") if e.strip()]
     dark_mode = os.environ.get("DARK_MODE", "true").strip().lower() == "true"
     min_free_memory_mb = int(os.environ.get("MIN_FREE_MEMORY_MB", "100") or 0)
+    screensaver_timeout_s = int(os.environ.get("SCREENSAVER_TIMEOUT_S", "60") or 0)
+    screensaver_source_dir = os.environ.get("SCREENSAVER_SOURCE_DIR", "").strip()
+    screensaver_photo_dir = os.environ.get("SCREENSAVER_PHOTO_DIR", "").strip()
+    screensaver_photo_interval_s = int(os.environ.get("SCREENSAVER_PHOTO_INTERVAL_S", "300") or 300)
+    screensaver_sync_interval_s = int(os.environ.get("SCREENSAVER_SYNC_INTERVAL_S", "600") or 600)
     shopping_list_entity = os.environ.get("SHOPPING_LIST_ENTITY", "todo.shopping_list").strip()
     if shopping_list_entity.lower() in ("", "none"):
         shopping_list_entity = None
@@ -649,6 +828,15 @@ def main():
         log.info("Shopping list widget: %s", shopping_list_entity)
     if chores_entities:
         log.info("Chores widget: %s", ", ".join(chores_entities))
+    if screensaver_timeout_s > 0:
+        log.info("Screensaver: activates after %ds idle", screensaver_timeout_s)
+        if screensaver_source_dir:
+            log.info(
+                "Screensaver photo sync: %s -> %s every %ds",
+                screensaver_source_dir, screensaver_photo_dir, screensaver_sync_interval_s,
+            )
+    else:
+        log.info("Screensaver disabled (screensaver_timeout_s=0)")
 
     stop_event = threading.Event()
     threading.Thread(
@@ -658,6 +846,19 @@ def main():
     fb = Framebuffer(os.environ.get("FB_DEVICE", "/dev/fb0"))
     renderer = Renderer(fb.xres, fb.yres, entities, dark_mode, shopping_list_entity, chores_entities)
     touch = TouchInput(fb.xres, fb.yres)
+
+    if screensaver_timeout_s > 0 and screensaver_source_dir and screensaver_photo_dir:
+        sync_screensaver_photos(screensaver_source_dir, screensaver_photo_dir, (fb.xres, fb.yres))
+        threading.Thread(
+            target=screensaver_sync_loop,
+            args=(screensaver_source_dir, screensaver_photo_dir, (fb.xres, fb.yres), screensaver_sync_interval_s, stop_event),
+            name="screensaver-sync", daemon=True,
+        ).start()
+
+    screensaver = (
+        Screensaver(fb.xres, fb.yres, screensaver_photo_dir, screensaver_photo_interval_s)
+        if screensaver_timeout_s > 0 else None
+    )
 
     dirty = threading.Event()
     dirty.set()  # draw once immediately
@@ -671,9 +872,27 @@ def main():
 
     last_cards = []
     last_widgets = []
+    last_activity = time.time()
+    screensaver_active = False
+    last_screensaver_key = None
     try:
         while True:
-            if dirty.is_set():
+            now = time.time()
+
+            if screensaver and not screensaver_active and now - last_activity >= screensaver_timeout_s:
+                screensaver_active = True
+                last_screensaver_key = None
+
+            if screensaver_active:
+                # HA state updates redraw neither the dashboard nor the
+                # screensaver - only the wall clock/photo rotation do, since
+                # idle is tracked purely off touch input.
+                dirty.clear()
+                key = screensaver.redraw_key(now)
+                if key != last_screensaver_key:
+                    last_screensaver_key = key
+                    fb.blit(screensaver.render(now))
+            elif dirty.is_set():
                 dirty.clear()
                 image, last_cards, last_widgets = renderer.render(client)
                 fb.blit(image)
@@ -686,7 +905,13 @@ def main():
             for fd in readable:
                 tap = touch.process(fd)
                 if tap:
-                    if handle_widget_tap(tap, last_widgets, renderer, client):
+                    last_activity = time.time()
+                    if screensaver_active:
+                        # First tap only wakes the display - it is not also
+                        # applied to whatever dashboard element is underneath.
+                        screensaver_active = False
+                        dirty.set()
+                    elif handle_widget_tap(tap, last_widgets, renderer, client):
                         dirty.set()
                     else:
                         handle_tap(tap, last_cards, client)

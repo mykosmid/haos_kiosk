@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Added a screensaver/smart-frame idle mode: after `screensaver_timeout_s`
+  (default 60s) of no touch input, the display switches to a full-screen
+  clock and date, plus rotating photos from `screensaver_photo_dir` if
+  configured. Only touches count as activity or wake the display - Home
+  Assistant state changes do neither - and the first wake tap is consumed
+  by dismissing the screensaver rather than also being applied to the
+  dashboard underneath. Set `screensaver_timeout_s` to `0` to disable.
+- Added `screensaver_source_dir`: if set, the Add-on automatically mirrors
+  photos from that folder (e.g. a Home Assistant `/media` folder) into
+  `screensaver_photo_dir`, downscaling/center-cropping each one to exactly
+  fill the display's resolution and keeping the two folders in sync on a
+  timer (`screensaver_sync_interval_s`) as photos are added or removed.
+
 ## v2.3.0 - July 2026
 
 - **Breaking config change**: `chores_entity` is renamed to `chores_entities`

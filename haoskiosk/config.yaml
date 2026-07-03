@@ -56,6 +56,7 @@ devices:
 
 map:
   - addon_config:rw
+  - media:rw
 
 options:
   ha_url: "http://localhost:8123"
@@ -65,6 +66,11 @@ options:
   dark_mode: true
   debug_mode: false
   min_free_memory_mb: 100
+  screensaver_timeout_s: 60
+  screensaver_source_dir: ""
+  screensaver_photo_dir: "/media/screensavers"
+  screensaver_photo_interval_s: 300
+  screensaver_sync_interval_s: 600
 
 schema:
   ha_token: password
@@ -75,6 +81,11 @@ schema:
   dark_mode: bool
   debug_mode: bool
   min_free_memory_mb: int(0,)
+  screensaver_timeout_s: int(0,)
+  screensaver_source_dir: str
+  screensaver_photo_dir: str
+  screensaver_photo_interval_s: int(5,)
+  screensaver_sync_interval_s: int(30,)
 
 translations:
   - en

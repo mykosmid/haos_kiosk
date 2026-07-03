@@ -55,3 +55,50 @@ configuration:
       restart the kiosk display rather than risk the kernel OOM-killer
       freezing it on memory-constrained devices. Set to 0 to disable.
       [Default: 100]
+  screensaver_timeout_s:
+    name: "Screensaver Timeout (seconds)"
+    description: |
+      Turn the display into a smart-frame screensaver (full-screen clock,
+      plus rotating photos if configured below) after this many seconds
+      with no touch input. Only touches count as activity - Home Assistant
+      state changes do not reset this timer or wake the display. Tapping
+      the screen while the screensaver is showing only wakes it back to the
+      normal dashboard; that tap is not also applied to the dashboard
+      underneath. Set to 0 to disable the screensaver entirely.
+      [Default: 60]
+  screensaver_source_dir:
+    name: "Screensaver Source Directory"
+    description: |
+      Absolute path to a folder of full-resolution photos to pull from, e.g.
+      "/media/family_photos" (Home Assistant's `/media` folder, mapped
+      read-write into this Add-on - drop files in there via the Media or
+      File Editor Add-on). Searched recursively. If set, the Add-on
+      automatically copies each photo into Screensaver Photo Directory,
+      downscaled/cropped to exactly fill the display, keeping that folder
+      in sync as files are added or removed. Leave blank to manage
+      Screensaver Photo Directory's contents yourself instead. [Default:
+      blank]
+  screensaver_photo_dir:
+    name: "Screensaver Photo Directory"
+    description: |
+      Absolute path to the folder of photos (.jpg/.jpeg/.png/.bmp/.gif) the
+      screensaver actually rotates through full-screen. If Screensaver
+      Source Directory is set, this folder is fully managed by the Add-on
+      (downscaled copies written in, stale ones removed) - don't edit its
+      contents directly. If Screensaver Source Directory is blank, populate
+      this folder yourself; photos are not resized in that case, so pre-size
+      them to the display's resolution for best results. Leave both blank
+      to show just the clock/date on a black background. [Default:
+      /media/screensavers]
+  screensaver_photo_interval_s:
+    name: "Screensaver Photo Interval (seconds)"
+    description: |
+      How long each photo is shown before rotating to the next one, while
+      the screensaver is active. Only relevant if Screensaver Photo
+      Directory has photos in it. [Default: 300]
+  screensaver_sync_interval_s:
+    name: "Screensaver Sync Interval (seconds)"
+    description: |
+      How often to re-scan Screensaver Source Directory for added/removed/
+      changed photos and re-sync Screensaver Photo Directory. Only relevant
+      if Screensaver Source Directory is configured. [Default: 600]

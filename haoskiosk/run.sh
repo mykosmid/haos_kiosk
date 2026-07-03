@@ -53,6 +53,11 @@ load_config_var CHORES_ENTITIES ""
 load_config_var DARK_MODE true
 load_config_var DEBUG_MODE false
 load_config_var MIN_FREE_MEMORY_MB 100
+load_config_var SCREENSAVER_TIMEOUT_S 60
+load_config_var SCREENSAVER_SOURCE_DIR ""
+load_config_var SCREENSAVER_PHOTO_DIR "/media/screensavers"
+load_config_var SCREENSAVER_PHOTO_INTERVAL_S 300
+load_config_var SCREENSAVER_SYNC_INTERVAL_S 600
 
 if [ -z "$HA_TOKEN" ] || [ -z "$ENTITIES" ]; then
     bashio::log.error "Error: HA_TOKEN and ENTITIES must be set"

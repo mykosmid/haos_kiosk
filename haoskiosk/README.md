@@ -48,9 +48,10 @@ enter it, along with the entities you want to display, in the
 If your display does not show up, try rebooting and restarting the Add-on
 with the display attached.
 
-**NOTE:** Display rotation and idle/screensaver behavior are not supported
-in this version - the display is expected to be in its normal landscape
-orientation and stays on continuously.
+**NOTE:** Display rotation is not supported in this version - the display is
+expected to be in its normal landscape orientation. An optional
+idle/screensaver mode (see **Screensaver Timeout** below) can turn the
+display into a smart photo frame after a period of no touch input.
 
 **NOTE:** If you encounter issues with the Add-on, please first check the
 HAOSKiosk github
@@ -144,6 +145,64 @@ Use a dark color scheme for the dashboard if `True`, otherwise light.
 For debugging purposes, sleeps without launching the kiosk display.
 Manually launch it (e.g., `python3 /kiosk.py`) from Docker container.\
 E.g., `sudo docker exec -it addon_haoskiosk bash`
+
+### Screensaver Timeout (seconds)
+
+Turns the display into a smart-frame screensaver - a full-screen clock and
+date, plus rotating photos if a **Screensaver Photo Directory** is
+configured - after this many seconds pass with no touch input. Only touches
+reset this timer or wake the display; Home Assistant entity state changes do
+not. The first tap after the screensaver activates only wakes the display
+back to the normal dashboard - it isn't also applied to whatever card or
+widget happens to be underneath. Set to `0` to disable. (Default: 60)
+
+### Screensaver Source Directory
+
+Absolute path to a folder of full-resolution photos to pull from, e.g.
+`/media/family_photos` (Home Assistant's `/media` folder, mapped
+read-write into this Add-on - drop files in there via the Media or File
+Editor Add-on/Samba share). Searched recursively.
+
+If set, the Add-on automatically mirrors every photo into **Screensaver
+Photo Directory**, downscaled and center-cropped to exactly fill the
+display's resolution, so the screensaver never has to decode a
+full-resolution photo at render time. It keeps that folder in sync on a
+timer (**Screensaver Sync Interval**) - add or remove a photo in the source
+folder and it's reflected there automatically, no restart needed. This
+runs once synchronously at startup before the display comes up, so a large
+source folder will add to Add-on startup time the first time (subsequent
+syncs only process what changed).
+
+Leave blank to manage **Screensaver Photo Directory**'s contents yourself
+instead - the Add-on won't touch that folder. (Default: blank)
+
+### Screensaver Photo Directory
+
+Absolute path to the folder of photos (`.jpg`, `.jpeg`, `.png`, `.bmp`,
+`.gif`) the screensaver actually rotates through full-screen.
+
+- If **Screensaver Source Directory** is set, this folder is fully managed
+  by the Add-on (downscaled copies written in, stale ones removed
+  automatically) - don't add or edit files in it directly, they'll be
+  removed on the next sync.
+- If **Screensaver Source Directory** is blank, populate this folder
+  yourself; photos aren't resized in that case, so pre-size them to the
+  display's resolution for best results and lowest memory use.
+
+Leave both settings blank to show just the clock/date on a black
+background instead. (Default: `/media/screensavers`)
+
+### Screensaver Photo Interval (seconds)
+
+How long each photo is shown before rotating to the next, while the
+screensaver is active. Only relevant if Screensaver Photo Directory has
+photos in it. (Default: 300)
+
+### Screensaver Sync Interval (seconds)
+
+How often to re-scan Screensaver Source Directory for added, removed, or
+changed photos and re-sync Screensaver Photo Directory. Only relevant if
+Screensaver Source Directory is configured. (Default: 600)
 
 ### Minimum Free Memory (MB)
 
