@@ -53,14 +53,16 @@ expected to be in its normal landscape orientation. An optional
 idle/screensaver mode (see **Screensaver Timeout** below) can turn the
 display into a smart photo frame after a period of no touch input.
 
-**NOTE:** While running, the Add-on switches the underlying Linux console
-into graphics mode so the kernel's own blinking text cursor doesn't bleed
-through on top of the display, restoring it if the Add-on stops cleanly.
-This requires access to a console device (`/dev/tty0`, `/dev/console`, or
-`/dev/tty1`) and the `SYS_TTY_CONFIG` capability, both already granted by
-this Add-on's configuration - if you've forked or manually configured the
-container yourself and still see a cursor, check that those aren't
-stripped out.
+**NOTE:** While running, the Add-on tries to switch the underlying Linux
+console into graphics mode so the kernel's own blinking text cursor doesn't
+bleed through on top of the display, restoring it if the Add-on stops
+cleanly. This requires a Linux capability (`SYS_TTY_CONFIG`) that Home
+Assistant's Supervisor has no supported way to grant to a regular Add-on -
+only a fully privileged Add-on (`full_access: true`, well beyond what this
+project otherwise needs) could provide it. On a standard install this
+means the attempt will most likely fail and the console cursor may still
+be visible; that failure is harmless and only logged as a warning, it
+doesn't affect the rest of the display.
 
 **NOTE:** If you encounter issues with the Add-on, please first check the
 HAOSKiosk github

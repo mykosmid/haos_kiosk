@@ -2,12 +2,16 @@
 
 ## Unreleased
 
-- Fixed the blinking Linux console cursor bleeding through on top of the
-  display: the Add-on now switches the console into graphics mode
-  (`KDSETMODE`/`KD_GRAPHICS`) for as long as it's running, restoring text
-  mode on clean shutdown. Requires the `SYS_TTY_CONFIG` capability and
-  access to a console device (`/dev/tty0`, `/dev/console`, or `/dev/tty1`),
-  both now granted by default in this Add-on's configuration.
+- Attempt to fix the blinking Linux console cursor bleeding through on top
+  of the display: the Add-on now tries to switch the console into graphics
+  mode (`KDSETMODE`/`KD_GRAPHICS`) for as long as it's running, restoring
+  text mode on clean shutdown. This needs the `SYS_TTY_CONFIG` capability,
+  which Supervisor has no supported way to grant a regular Add-on - so on
+  a standard install this will likely fail and only log a warning, leaving
+  the cursor visible; it does not affect anything else. (An earlier draft
+  of this fix added `privileged: [SYS_TTY_CONFIG]` to `config.yaml`, which
+  isn't a Supervisor-recognized capability and broke the Add-on's config
+  validation entirely, making it disappear from the Add-on store - removed.)
 
 - Added a screensaver/smart-frame idle mode: after `screensaver_timeout_s`
   (default 60s) of no touch input, the display switches to a full-screen

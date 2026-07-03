@@ -25,9 +25,6 @@ ulimits:
     soft: 65536
     hard: 65536
 
-privileged:
-  - SYS_TTY_CONFIG
-
 devices:
   - /dev/fb0
   - /dev/tty0
