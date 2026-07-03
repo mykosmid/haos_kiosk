@@ -613,11 +613,22 @@ if screensaver_enabled then
                     .then(function(r) { return r.blob(); })
                     .then(function(blob) { return createImageBitmap(blob, { resizeWidth: maxDim, resizeQuality: 'medium' }); })
                     .then(function(bitmap) {
+                        // Don't trust bitmap.width/height for the canvas size - some WebKit
+                        // builds silently ignore the resizeWidth option above and return the
+                        // bitmap at full original resolution. A <canvas> allocates its native
+                        // GDK/X11 backing surface at exactly canvas.width x canvas.height (X11
+                        // caps window/pixmap dimensions at 32767px), so a wide panorama photo
+                        // at full res can crash the renderer. Always compute our own capped
+                        // target size and let drawImage do the scaling into it.
+                        var scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+                        var targetW = Math.max(1, Math.round(bitmap.width * scale));
+                        var targetH = Math.max(1, Math.round(bitmap.height * scale));
+
                         var canvas = document.createElement('canvas');
-                        canvas.width = bitmap.width;
-                        canvas.height = bitmap.height;
+                        canvas.width = targetW;
+                        canvas.height = targetH;
                         canvas.style.cssText = MEDIA_STYLE;
-                        canvas.getContext('2d').drawImage(bitmap, 0, 0);
+                        canvas.getContext('2d').drawImage(bitmap, 0, 0, targetW, targetH);
                         bitmap.close();
                         overlay.innerHTML = '';
                         overlay.appendChild(canvas);

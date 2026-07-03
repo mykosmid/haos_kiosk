@@ -19,6 +19,12 @@
   original phone photos can be uploaded as-is without manual resizing.
 - Removed stale `examples/screensaver.sh`, which relied on a REST API that
   no longer exists in this Add-on.
+- Fixed screensaver crash ("Native Windows wider or taller than 32767
+  pixels are not supported"): the canvas backing surface was sized to the
+  decoded bitmap's actual resolution, which can exceed X11's window/pixmap
+  size limit if this WebKit build ignores `createImageBitmap`'s
+  `resizeWidth` option (e.g. for wide panorama photos). The canvas is now
+  always capped to the computed target size regardless of bitmap size.
 
 ## v1.3.2 - April 2026
 
