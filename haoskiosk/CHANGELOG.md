@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.3.0 - July 2026
+
+- **Breaking config change**: `chores_entity` is renamed to `chores_entities`
+  and now accepts a comma-separated list of Home Assistant `todo` lists
+  (like `entities`), all merged into the same top-right widget - e.g. a
+  shared list plus a roommate's own list.
+- Chores widget items now show a filled square toggle button instead of a
+  checkbox outline - red while pending, green once completed - and tapping
+  it flips the item's status both ways (complete or reopen) via
+  `todo.update_item`, instead of one-way completion that removed the item
+  from view.
+- Removed full-screen expand/collapse for both corner widgets (shopping
+  list and chores) - tapping a widget no longer does anything except toggle
+  an item's status on the chores widget. Both widgets always render at
+  their normal grid-cell size.
+
+## v2.2.0 - July 2026
+
+- Added a tap-to-complete chores widget (`chores_entity`, disabled by
+  default) in the top-right corner of the entity grid, backed by any Home
+  Assistant `todo` list. Each item shows a checkbox; tapping it calls
+  `todo.update_item` to mark it complete in Home Assistant and it
+  disappears from the widget. Can be shown alongside the shopping list
+  widget (bottom-right) at the same time - the grid automatically reserves
+  both corners.
+
 ## v2.1.0 - July 2026
 
 - Added a read-only shopping list widget (`shopping_list_entity`, default

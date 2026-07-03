@@ -1,7 +1,7 @@
 ---
 name: "HAOS Kiosk Display"
 description: "Minimal native framebuffer kiosk for Home Assistant touchscreen display"
-version: "2.1.0"
+version: "2.3.0"
 slug: "haoskiosk"
 url: https://github.com/mykosmid/haos_kiosk/tree/main/haoskiosk
 
@@ -61,6 +61,7 @@ options:
   ha_url: "http://localhost:8123"
   entities: ""
   shopping_list_entity: "todo.shopping_list"
+  chores_entities: ""
   dark_mode: true
   debug_mode: false
   min_free_memory_mb: 100
@@ -70,6 +71,7 @@ schema:
   ha_url: str
   entities: str
   shopping_list_entity: str
+  chores_entities: str
   dark_mode: bool
   debug_mode: bool
   min_free_memory_mb: int(0,)

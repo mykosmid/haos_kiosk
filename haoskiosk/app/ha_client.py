@@ -17,16 +17,16 @@ log = logging.getLogger("ha_client")
 
 
 class HAClient:
-    def __init__(self, url, token, entity_ids, todo_entity_id=None, on_update=None):
+    def __init__(self, url, token, entity_ids, todo_entity_ids=None, on_update=None):
         self._ws_url = _to_ws_url(url)
         self._token = token
         self._entity_ids = set(entity_ids)
-        self._todo_entity_id = todo_entity_id or None
+        self._todo_entity_ids = set(todo_entity_ids or [])
         self._on_update = on_update  # callback(entity_id), invoked from the asyncio thread
 
         self.lock = threading.Lock()
         self.states = {}  # entity_id -> HA state dict
-        self.todo_items = []  # list of {"uid", "summary", "status"} dicts for _todo_entity_id
+        self.todo_items = {}  # entity_id -> list of {"uid", "summary", "status"} dicts
         self.connected = threading.Event()
 
         self._loop = None
@@ -44,17 +44,20 @@ class HAClient:
         with self.lock:
             return self.states.get(entity_id)
 
-    def get_todo_items(self):
+    def get_todo_items(self, entity_id):
         with self.lock:
-            return list(self.todo_items)
+            return list(self.todo_items.get(entity_id, []))
 
-    def call_service(self, domain, service, entity_id):
+    def call_service(self, domain, service, entity_id, service_data=None):
         if self._loop is None:
             log.warning("Cannot call %s.%s on %s: not connected yet", domain, service, entity_id)
             return
         asyncio.run_coroutine_threadsafe(
-            self._call_service_async(domain, service, entity_id), self._loop
+            self._call_service_async(domain, service, entity_id, service_data), self._loop
         )
+
+    def set_todo_item_status(self, entity_id, uid, status):
+        self.call_service("todo", "update_item", entity_id, {"item": uid, "status": status})
 
     # -- background thread / asyncio internals -----------------------------------
 
@@ -83,7 +86,7 @@ class HAClient:
             self._msg_id = 0
             await self._authenticate(ws)
             await self._seed_states(ws)
-            if self._todo_entity_id:
+            if self._todo_entity_ids:
                 await self._seed_todo_items(ws)
             await ws.send(json.dumps({
                 "id": self._next_id(),
@@ -125,44 +128,47 @@ class HAClient:
             return
 
     async def _seed_todo_items(self, ws):
-        req_id = self._next_id()
-        await ws.send(json.dumps({"id": req_id, "type": "todo/item/list", "entity_id": self._todo_entity_id}))
-        while True:
-            resp = json.loads(await ws.recv())
-            if resp.get("id") != req_id:
-                continue  # ignore unrelated messages that might arrive first
-            if not resp.get("success"):
-                log.warning("todo/item/list failed for %s: %s", self._todo_entity_id, resp)
-                return
-            with self.lock:
-                self.todo_items = resp["result"]["items"]
-            return
+        for entity_id in self._todo_entity_ids:
+            req_id = self._next_id()
+            await ws.send(json.dumps({"id": req_id, "type": "todo/item/list", "entity_id": entity_id}))
+            while True:
+                resp = json.loads(await ws.recv())
+                if resp.get("id") != req_id:
+                    continue  # ignore unrelated messages that might arrive first
+                if not resp.get("success"):
+                    log.warning("todo/item/list failed for %s: %s", entity_id, resp)
+                    break
+                with self.lock:
+                    self.todo_items[entity_id] = resp["result"]["items"]
+                break
 
-    async def _refresh_todo_items(self):
+    async def _refresh_todo_items(self, entity_id):
         if self._ws is None:
             return
+        req_id = None
         try:
             req_id = self._next_id()
             fut = self._loop.create_future()
             self._pending[req_id] = fut
             await self._ws.send(json.dumps({
-                "id": req_id, "type": "todo/item/list", "entity_id": self._todo_entity_id,
+                "id": req_id, "type": "todo/item/list", "entity_id": entity_id,
             }))
             resp = await fut
             if not resp.get("success"):
-                log.warning("todo/item/list failed for %s: %s", self._todo_entity_id, resp)
+                log.warning("todo/item/list failed for %s: %s", entity_id, resp)
                 return
             with self.lock:
-                self.todo_items = resp["result"]["items"]
+                self.todo_items[entity_id] = resp["result"]["items"]
             if self._on_update:
                 try:
-                    self._on_update(self._todo_entity_id)
+                    self._on_update(entity_id)
                 except Exception:
-                    log.exception("on_update callback failed for %s", self._todo_entity_id)
+                    log.exception("on_update callback failed for %s", entity_id)
         except Exception:
-            log.exception("Failed to refresh todo items for %s", self._todo_entity_id)
+            log.exception("Failed to refresh todo items for %s", entity_id)
         finally:
-            self._pending.pop(req_id, None)
+            if req_id is not None:
+                self._pending.pop(req_id, None)
 
     def _handle_message(self, msg):
         if msg.get("type") == "result":
@@ -178,10 +184,10 @@ class HAClient:
         data = event.get("data", {})
         entity_id = data.get("entity_id")
         new_state = data.get("new_state")
-        if entity_id == self._todo_entity_id:
+        if entity_id in self._todo_entity_ids:
             # The todo entity's state is just an item count, not useful on its
             # own - refetch the full item list whenever it changes.
-            asyncio.create_task(self._refresh_todo_items())
+            asyncio.create_task(self._refresh_todo_items(entity_id))
             return
         if entity_id not in self._entity_ids or new_state is None:
             return
@@ -193,18 +199,21 @@ class HAClient:
             except Exception:
                 log.exception("on_update callback failed for %s", entity_id)
 
-    async def _call_service_async(self, domain, service, entity_id):
+    async def _call_service_async(self, domain, service, entity_id, service_data=None):
         if not self.connected.is_set() or self._ws is None:
             log.warning("Cannot call %s.%s on %s: not connected", domain, service, entity_id)
             return
         try:
-            await self._ws.send(json.dumps({
+            msg = {
                 "id": self._next_id(),
                 "type": "call_service",
                 "domain": domain,
                 "service": service,
                 "target": {"entity_id": entity_id},
-            }))
+            }
+            if service_data:
+                msg["service_data"] = service_data
+            await self._ws.send(json.dumps(msg))
         except Exception:
             log.exception("Failed to call %s.%s on %s", domain, service, entity_id)
 

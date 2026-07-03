@@ -25,6 +25,16 @@ configuration:
       "todo.shopping_list" (the built-in Shopping List integration's
       default entity). Set to "none" to hide the widget entirely.
       [Default: todo.shopping_list]
+  chores_entities:
+    name: "Chores Entities"
+    description: |
+      Comma-separated list of Home Assistant 'todo' list entity_ids to
+      combine into a tap-to-toggle widget in the top-right corner of the
+      display, e.g. "todo.chores,todo.roommate_chores". Unlike the shopping
+      list widget, each item shows a square toggle button - red while
+      pending, green once completed - and tapping it flips that item's
+      status in Home Assistant. Leave blank to disable (disabled by
+      default, since there's no built-in chores list entity).
   dark_mode:
     name: "Dark Mode"
     description: |
