@@ -11,10 +11,17 @@
   it flips the item's status both ways (complete or reopen) via
   `todo.update_item`, instead of one-way completion that removed the item
   from view.
-- Removed full-screen expand/collapse for both corner widgets (shopping
-  list and chores) - tapping a widget no longer does anything except toggle
-  an item's status on the chores widget. Both widgets always render at
-  their normal grid-cell size.
+- Both corner widgets are now a fixed quarter of the screen (half width,
+  half height) rather than sized off the entity grid's own cell size, so
+  there's much more room for text before anything needs to be truncated or
+  collapsed into a "+N more" count. If only one of the two is configured, it
+  takes the entire right half of the screen instead of just its quarter.
+  The entity grid is confined to the left half of the screen whenever
+  either widget is shown, and spans the full screen when neither is.
+- Removed full-screen expand/collapse for the chores widget - since its box
+  is already sized to fit the whole list, tapping it now only toggles an
+  item's status and does nothing elsewhere. The shopping list widget keeps
+  its existing tap-to-expand/collapse behavior.
 
 ## v2.2.0 - July 2026
 

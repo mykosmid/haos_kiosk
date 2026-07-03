@@ -1,13 +1,14 @@
 """Native, browser-free Home Assistant kiosk display.
 
-Renders a small grid of entity cards, plus two optional corner to-do
-widgets - a read-only shopping list (bottom-right) and a tap-to-toggle
-chores list (top-right, can combine multiple todo lists) - directly to the
-Linux framebuffer (/dev/fb0) using Pillow, reads touch input directly from
-/dev/input/eventN via evdev, and talks to Home Assistant over its WebSocket
-API (ha_client.py) for state and tap-to-toggle control. No X11/GTK/WebKit
-anywhere in this stack - the point is to use as little memory as possible on
-a memory-constrained device (e.g. a 1GB Raspberry Pi).
+Renders a small grid of entity cards, plus two optional to-do widgets, each
+a fixed quarter (or half, if the other is absent) of the screen - a
+read-only shopping list (bottom-right, tap to expand full-screen) and a
+tap-to-toggle chores list (top-right, can combine multiple todo lists) -
+directly to the Linux framebuffer (/dev/fb0) using Pillow, reads touch input
+directly from /dev/input/eventN via evdev, and talks to Home Assistant over
+its WebSocket API (ha_client.py) for state and tap-to-toggle control. No
+X11/GTK/WebKit anywhere in this stack - the point is to use as little memory
+as possible on a memory-constrained device (e.g. a 1GB Raspberry Pi).
 """
 
 import collections
@@ -224,53 +225,65 @@ class Renderer:
         self.palette = PALETTE_DARK if dark_mode else PALETTE_LIGHT
         self.font_name = _load_font(FONT_CANDIDATES, 22)
         self.font_state = _load_font(FONT_BOLD_CANDIDATES + FONT_CANDIDATES, 30)
-        self.font_small = _load_font(FONT_CANDIDATES, 18)
+        self.expanded = False  # True while the shopping list is shown full-screen
 
         self.widgets = []
         if shopping_list_entity:
             self.widgets.append({
                 "entity_ids": [shopping_list_entity], "title": "Shopping List",
-                "corner": "bottom-right", "interactive": False,
+                "corner": "bottom-right", "interactive": False, "expandable": True,
             })
         if chores_entities:
             self.widgets.append({
                 "entity_ids": chores_entities, "title": "Chores",
-                "corner": "top-right", "interactive": True,
+                "corner": "top-right", "interactive": True, "expandable": False,
             })
 
-        total_slots = len(entity_ids) + len(self.widgets)
-        self.cols = 3 if total_slots > 6 else 2
-        self.rows = math.ceil(total_slots / self.cols) if total_slots else 1
-        # Two widgets in different corners need at least two rows to actually
-        # land in different cells, even if the entity count alone wouldn't
-        # otherwise require it.
-        if any(w["corner"] == "top-right" for w in self.widgets) and any(
+        # Each configured widget is a fixed quarter of the screen (half width,
+        # half height) in its designated corner - not sized off however many
+        # entities are configured - so there's always enough room to show a
+        # full list without truncating. If only one widget is configured it
+        # gets the whole right half instead of just its quarter, since
+        # there's no other widget to share that space with.
+        both_present = any(w["corner"] == "top-right" for w in self.widgets) and any(
             w["corner"] == "bottom-right" for w in self.widgets
-        ):
-            self.rows = max(self.rows, 2)
-
-        # Each widget always occupies its designated corner cell of the grid,
-        # regardless of how many entities there are - entities fill the
-        # remaining cells in order, skipping over any reserved ones.
+        )
         for widget in self.widgets:
-            widget["reserved_index"] = (
-                self.cols - 1 if widget["corner"] == "top-right" else self.rows * self.cols - 1
-            )
+            if widget["corner"] == "top-right":
+                y1 = height // 2 if both_present else height
+                widget["rect"] = (width // 2 + CARD_MARGIN, CARD_MARGIN, width - CARD_MARGIN, y1 - CARD_MARGIN)
+            else:
+                y0 = height // 2 if both_present else 0
+                widget["rect"] = (width // 2 + CARD_MARGIN, y0 + CARD_MARGIN, width - CARD_MARGIN, height - CARD_MARGIN)
+
+        # The entity grid is confined to the left half of the screen whenever
+        # any widget is shown (freeing the whole right half for widgets), and
+        # spans the full screen when neither is configured.
+        self.entity_area = (0, 0, width // 2 if self.widgets else width, height)
+        self.cols = 3 if len(entity_ids) > 6 else 2
+        self.rows = math.ceil(len(entity_ids) / self.cols) if entity_ids else 1
 
     def render(self, client):
         img = Image.new("RGB", (self.width, self.height), self.palette["bg"])
         draw = ImageDraw.Draw(img)
 
-        cards = []
-        cell_w = self.width // self.cols
-        cell_h = self.height // self.rows
-        reserved_indices = {w["reserved_index"] for w in self.widgets}
+        if self.expanded:
+            config = next(w for w in self.widgets if w["expandable"])
+            rect = (CARD_MARGIN, CARD_MARGIN, self.width - CARD_MARGIN, self.height - CARD_MARGIN)
+            item_hits = self._draw_todo_widget(draw, rect, client, config, expanded=True)
+            widget_hit = {
+                "rect": rect, "interactive": config["interactive"],
+                "expandable": True, "item_hits": item_hits,
+            }
+            return img, [], [widget_hit]
 
-        cell_index = 0
-        for entity_id in self.entity_ids:
-            while cell_index in reserved_indices:
-                cell_index += 1
-            rect = self._cell_rect(cell_index, cell_w, cell_h)
+        cards = []
+        ex0, ey0, ex1, ey1 = self.entity_area
+        cell_w = (ex1 - ex0) // self.cols
+        cell_h = (ey1 - ey0) // self.rows
+
+        for index, entity_id in enumerate(self.entity_ids):
+            rect = self._cell_rect(index, cell_w, cell_h)
             x0, y0, x1, y1 = rect
 
             state = client.get_state(entity_id)
@@ -292,14 +305,13 @@ class Renderer:
             )
 
             cards.append(Card(rect=rect, entity_id=entity_id, domain=domain))
-            cell_index += 1
 
         widget_hits = []
         for config in self.widgets:
-            rect = self._cell_rect(config["reserved_index"], cell_w, cell_h)
-            item_hits = self._draw_todo_widget(draw, rect, client, config)
+            item_hits = self._draw_todo_widget(draw, config["rect"], client, config)
             widget_hits.append({
-                "rect": rect, "interactive": config["interactive"], "item_hits": item_hits,
+                "rect": config["rect"], "interactive": config["interactive"],
+                "expandable": config["expandable"], "item_hits": item_hits,
             })
 
         return img, cards, widget_hits
@@ -310,16 +322,22 @@ class Renderer:
         x1, y1 = (col + 1) * cell_w - CARD_MARGIN, (row + 1) * cell_h - CARD_MARGIN
         return x0, y0, x1, y1
 
-    def _draw_todo_widget(self, draw, rect, client, config):
-        """Draws one corner to-do widget and returns a list of item-hit dicts
-        (rect/entity_id/uid/status) for tap-to-toggle - empty unless
-        config["interactive"]. Non-interactive widgets only show items that
-        aren't complete yet; interactive ones show everything so a completed
-        item's toggle square stays visible (green) and can be tapped again to
-        reopen it."""
+    def _draw_todo_widget(self, draw, rect, client, config, expanded=False):
+        """Draws one to-do widget (its normal quarter/half-screen box, or a
+        full-screen expanded view for config["expandable"] widgets) and
+        returns a list of item-hit dicts (rect/entity_id/uid/status) for
+        tap-to-toggle - empty unless config["interactive"]. Non-interactive
+        widgets only show items that aren't complete yet; interactive ones
+        show everything so a completed item's toggle square stays visible
+        (green) and can be tapped again to reopen it."""
         x0, y0, x1, y1 = rect
         draw.rounded_rectangle([x0, y0, x1, y1], radius=14, fill=self.palette["card"])
-        draw.text((x0 + 16, y0 + 14), config["title"], font=self.font_name, fill=self.palette["text"])
+
+        item_font = self.font_state if expanded else self.font_name
+        line_height = 36 if expanded else 30
+        title_gap = 60 if expanded else 54
+
+        draw.text((x0 + 16, y0 + 14), config["title"], font=self.font_state, fill=self.palette["text"])
 
         interactive = config["interactive"]
         items = []
@@ -328,43 +346,69 @@ class Renderer:
                 if interactive or item.get("status") != "completed":
                     items.append({**item, "_entity_id": entity_id})
 
-        top_y = y0 + 50
+        top_y = y0 + title_gap
         bottom_y = y1 - 12
-        return self._draw_items(draw, items, x0, x1, top_y, bottom_y, self.font_small, 26, interactive)
+        return self._draw_items(draw, items, x0, x1, top_y, bottom_y, item_font, line_height, interactive)
 
     def _draw_items(self, draw, items, x0, x1, top_y, bottom_y, item_font, line_height, interactive):
+        """Lay out items in a single column, wrapping into a second column if
+        they don't all fit, before ever falling back to a "+N more" count."""
         item_hits = []
+        if not items:
+            draw.text((x0 + 16, top_y), "(empty)", font=item_font, fill=self.palette["text"])
+            return item_hits
+
         prefix_width = TOGGLE_SIZE + 8 if interactive else 0
-        text_x = x0 + 16 + prefix_width
+        max_lines_per_col = max(1, (bottom_y - top_y) // line_height)
 
-        y = top_y
-        max_lines = max(0, (bottom_y - y) // line_height)
-        visible, overflow = items[:max_lines], max(0, len(items) - max_lines)
-        if overflow and visible:
-            # Reserve the last visible line for the "+N more" count instead of
-            # a full item, so it's never drawn past the widget's bottom edge.
-            visible, overflow = items[:max_lines - 1], len(items) - (max_lines - 1)
-
-        for item in visible:
-            status = item.get("status")
-            if interactive:
-                self._draw_toggle_square(draw, x0 + 16, y, status == "completed")
-            text = _truncate_text(draw, item.get("summary", ""), item_font, (x1 - 16) - text_x)
-            prefix = "" if interactive else "• "
-            draw.text((text_x, y), f"{prefix}{text}", font=item_font, fill=self.palette["text"])
+        def emit_hit(item, rect):
             if interactive:
                 item_hits.append({
-                    "rect": (x0, y - 4, x1, y + line_height - 4),
-                    "entity_id": item.get("_entity_id"),
-                    "uid": item.get("uid"),
-                    "status": status,
+                    "rect": rect, "entity_id": item.get("_entity_id"),
+                    "uid": item.get("uid"), "status": item.get("status"),
                 })
-            y += line_height
 
-        if not items:
-            draw.text((x0 + 16, y), "(empty)", font=item_font, fill=self.palette["text"])
-        elif overflow:
-            draw.text((x0 + 16, y), f"+{overflow} more", font=item_font, fill=self.palette["accent"])
+        if len(items) <= max_lines_per_col:
+            y = top_y
+            for item in items:
+                if interactive:
+                    self._draw_toggle_square(draw, x0 + 16, y, item.get("status") == "completed")
+                text = _truncate_text(draw, item.get("summary", ""), item_font, (x1 - 16) - (x0 + 16 + prefix_width))
+                prefix = "" if interactive else "• "
+                draw.text((x0 + 16 + prefix_width, y), f"{prefix}{text}", font=item_font, fill=self.palette["text"])
+                emit_hit(item, (x0, y - 4, x1, y + line_height - 4))
+                y += line_height
+            return item_hits
+
+        col_gap = 24
+        col_width = (x1 - x0 - 32 - col_gap) // 2
+        col_x = [x0 + 16, x0 + 16 + col_width + col_gap]
+
+        capacity = max_lines_per_col * 2
+        visible, overflow = items[:capacity], max(0, len(items) - capacity)
+        if overflow:
+            # Reserve the last slot (bottom of the second column) for the
+            # "+N more" count instead of a full item.
+            visible, overflow = items[:capacity - 1], len(items) - (capacity - 1)
+
+        for index, item in enumerate(visible):
+            col, row = divmod(index, max_lines_per_col)
+            base_x = col_x[col]
+            y = top_y + row * line_height
+            if interactive:
+                self._draw_toggle_square(draw, base_x, y, item.get("status") == "completed")
+            text = _truncate_text(draw, item.get("summary", ""), item_font, col_width - prefix_width - 8)
+            prefix = "" if interactive else "• "
+            draw.text((base_x + prefix_width, y), f"{prefix}{text}", font=item_font, fill=self.palette["text"])
+            col_right = col_x[col] + col_width if col == 0 else x1
+            emit_hit(item, (base_x, y - 4, col_right, y + line_height - 4))
+
+        if overflow:
+            col, row = divmod(len(visible), max_lines_per_col)
+            draw.text(
+                (col_x[col], top_y + row * line_height), f"+{overflow} more",
+                font=item_font, fill=self.palette["accent"],
+            )
 
         return item_hits
 
@@ -474,7 +518,7 @@ class TouchInput:
                     state.start_x, state.start_y = state.x, state.y
                 elif event.value == 0 and state.down:
                     state.down = False
-                    if state.start_x is not None and state.x is not None:
+                    if None not in (state.start_x, state.start_y, state.x, state.y):
                         moved = abs(state.x - state.start_x) + abs(state.y - state.start_y)
                         if moved < TAP_MOVE_THRESHOLD:
                             tap = self._scale(state)
@@ -522,12 +566,13 @@ def handle_tap(pos, cards, client):
             return
 
 
-def handle_widget_tap(pos, widgets, client):
-    """Returns True if a corner to-do widget consumed the tap - i.e. the tap
-    landed inside a widget's rect at all - False if it should fall through to
-    the entity grid instead. Tapping an item's toggle square on an
-    interactive widget flips it between "needs_action" and "completed" in
-    Home Assistant; tapping elsewhere in a widget does nothing."""
+def handle_widget_tap(pos, widgets, renderer, client):
+    """Returns True if a to-do widget consumed the tap - i.e. the tap landed
+    inside a widget's rect at all - False if it should fall through to the
+    entity grid instead. Tapping an item's toggle square on an interactive
+    widget (chores) flips it between "needs_action" and "completed" in Home
+    Assistant. Tapping anywhere else on an expandable widget (the shopping
+    list) toggles its full-screen view."""
     for widget in widgets:
         if not _point_in_rect(pos, widget["rect"]):
             continue
@@ -537,6 +582,8 @@ def handle_widget_tap(pos, widgets, client):
                 new_status = "needs_action" if hit["status"] == "completed" else "completed"
                 log.info("Tap at %s: setting %s on %s to %s", pos, hit["uid"], hit["entity_id"], new_status)
                 client.set_todo_item_status(hit["entity_id"], hit["uid"], new_status)
+        elif widget["expandable"]:
+            renderer.expanded = not renderer.expanded
         return True
     return False
 
@@ -639,7 +686,7 @@ def main():
             for fd in readable:
                 tap = touch.process(fd)
                 if tap:
-                    if handle_widget_tap(tap, last_widgets, client):
+                    if handle_widget_tap(tap, last_widgets, renderer, client):
                         dirty.set()
                     else:
                         handle_tap(tap, last_cards, client)

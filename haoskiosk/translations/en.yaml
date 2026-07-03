@@ -21,15 +21,16 @@ configuration:
     name: "Shopping List Entity"
     description: |
       Entity ID of a Home Assistant 'todo' list to show as a read-only
-      widget in the bottom-right corner of the display, e.g.
+      widget in the bottom-right quarter of the display, e.g.
       "todo.shopping_list" (the built-in Shopping List integration's
-      default entity). Set to "none" to hide the widget entirely.
+      default entity). Tap it to expand it full-screen; tap anywhere to
+      collapse it back. Set to "none" to hide the widget entirely.
       [Default: todo.shopping_list]
   chores_entities:
     name: "Chores Entities"
     description: |
       Comma-separated list of Home Assistant 'todo' list entity_ids to
-      combine into a tap-to-toggle widget in the top-right corner of the
+      combine into a tap-to-toggle widget in the top-right quarter of the
       display, e.g. "todo.chores,todo.roommate_chores". Unlike the shopping
       list widget, each item shows a square toggle button - red while
       pending, green once completed - and tapping it flips that item's

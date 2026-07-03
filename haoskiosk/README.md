@@ -21,17 +21,24 @@ no graphs, and no scrolling - if you need any of that, this add-on isn't the
 right fit.
 
 A read-only shopping list widget can also be shown in the bottom-right
-corner of the grid, pulled live from a Home Assistant `todo` list (e.g. the
-built-in Shopping List integration). It is enabled by default and shown
-regardless of how many entities you configure.
+quarter of the screen, pulled live from a Home Assistant `todo` list (e.g.
+the built-in Shopping List integration). It is enabled by default and shown
+regardless of how many entities you configure. Tap it to expand it to a
+full-screen view; tap anywhere to collapse it back.
 
-An optional chores widget can also be shown in the top-right corner,
-combining one or more other Home Assistant `todo` lists (e.g. a shared list
-plus a roommate's own list). Unlike the shopping list widget, each item
-shows a square toggle button instead of a bullet - red while pending, green
-once completed - and tapping it flips that item's status directly in Home
-Assistant. It's disabled by default since there's no built-in chores list
-entity to point it at.
+An optional chores widget can also be shown in the top-right quarter of the
+screen, combining one or more other Home Assistant `todo` lists (e.g. a
+shared list plus a roommate's own list). Unlike the shopping list widget,
+each item shows a square toggle button instead of a bullet - red while
+pending, green once completed - and tapping it flips that item's status
+directly in Home Assistant; it doesn't have a full-screen view since its box
+is already sized to fit the whole list. It's disabled by default since
+there's no built-in chores list entity to point it at.
+
+If only one of the two widgets is enabled, it takes up the entire right half
+of the screen instead of just its quarter, since there's no other widget to
+share that space with. The entity grid always fills the remaining space (the
+left half, whenever a widget is shown; the full screen otherwise).
 
 **NOTE:** You must generate a Home Assistant long-lived access token and
 enter it, along with the entities you want to display, in the
@@ -111,15 +118,16 @@ to toggle; anything else is shown read-only.
 ### Shopping List Entity
 
 Entity ID of a Home Assistant `todo` list to show as a read-only widget in
-the bottom-right corner of the display, e.g. `todo.shopping_list` (the
+the bottom-right quarter of the display, e.g. `todo.shopping_list` (the
 built-in Shopping List integration's default entity). Only items not yet
-marked complete are shown. Set to `none` to hide the widget.
+marked complete are shown. Tap the widget to expand it full-screen; tap
+anywhere to collapse it back. Set to `none` to hide the widget.
 (Default: `todo.shopping_list`)
 
 ### Chores Entities
 
 Comma-separated list of Home Assistant `todo` list entity_ids to combine
-into a tap-to-toggle widget in the top-right corner of the display, e.g.
+into a tap-to-toggle widget in the top-right quarter of the display, e.g.
 `todo.chores,todo.roommate_chores`. Each item shows a square toggle button -
 red while pending, green once completed - and tapping it calls Home
 Assistant's `todo.update_item` service to flip that item's status. Leave
