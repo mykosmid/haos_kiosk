@@ -41,6 +41,12 @@ CARD_MARGIN = 12
 TOGGLE_SIZE = 16
 TAP_MOVE_THRESHOLD = 24  # px of finger movement before a touch is treated as a drag, not a tap
 
+# Light cards get "-"/"+" buttons that nudge brightness via light.turn_on's
+# brightness_step_pct, rather than setting an absolute level - that way
+# repeated taps behave the same regardless of the light's current brightness.
+BRIGHTNESS_BUTTON_SIZE = 44
+BRIGHTNESS_STEP_PCT = 10
+
 FONT_CANDIDATES = [
     os.environ.get("FONT_PATH", ""),
     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
@@ -70,7 +76,7 @@ PALETTE_LIGHT = {
     "toggle_pending": (195, 55, 55),
 }
 
-Card = collections.namedtuple("Card", ["rect", "entity_id", "domain"])
+Card = collections.namedtuple("Card", ["rect", "entity_id", "domain", "buttons"], defaults=[{}])
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +345,7 @@ class Renderer:
             )
 
             name = _friendly_name(state, entity_id)
-            state_text = _format_state(state)
+            state_text = _format_state(state, domain)
 
             draw.text((x0 + 16, y0 + 14), name, font=self.font_name, fill=self.palette["text"])
             draw.text(
@@ -347,7 +353,8 @@ class Renderer:
                 fill=self.palette["accent"] if is_on else self.palette["text"],
             )
 
-            cards.append(Card(rect=rect, entity_id=entity_id, domain=domain))
+            buttons = self._draw_brightness_buttons(draw, rect, is_on) if domain == "light" else {}
+            cards.append(Card(rect=rect, entity_id=entity_id, domain=domain, buttons=buttons))
 
         widget_hits = []
         for config in self.widgets:
@@ -455,6 +462,32 @@ class Renderer:
 
         return item_hits
 
+    def _draw_brightness_buttons(self, draw, card_rect, is_on):
+        """Draws "-"/"+" buttons in a light card's bottom-right corner and
+        returns their hit rects, keyed "minus"/"plus", for handle_tap()."""
+        x0, y0, x1, y1 = card_rect
+        size = BRIGHTNESS_BUTTON_SIZE
+        pad = 12
+        gap = 10
+        plus_rect = (x1 - size - pad, y1 - size - pad, x1 - pad, y1 - pad)
+        minus_rect = (
+            plus_rect[0] - gap - size, plus_rect[1],
+            plus_rect[0] - gap, plus_rect[3],
+        )
+        buttons = {"minus": minus_rect, "plus": plus_rect}
+        for label, rect in (("-", minus_rect), ("+", plus_rect)):
+            bx0, by0, bx1, by1 = rect
+            draw.rounded_rectangle(
+                [bx0, by0, bx1, by1], radius=10,
+                fill=self.palette["accent"] if is_on else self.palette["bg"],
+            )
+            tw = draw.textlength(label, font=self.font_state)
+            draw.text(
+                (bx0 + (size - tw) / 2, by0 + (size - 34) / 2), label, font=self.font_state,
+                fill=self.palette["bg"] if is_on else self.palette["text"],
+            )
+        return buttons
+
     def _draw_toggle_square(self, draw, x, y, completed):
         color = self.palette["toggle_done"] if completed else self.palette["toggle_pending"]
         draw.rounded_rectangle([x, y + 2, x + TOGGLE_SIZE, y + 2 + TOGGLE_SIZE], radius=3, fill=color)
@@ -468,11 +501,14 @@ def _friendly_name(state, entity_id):
     return entity_id
 
 
-def _format_state(state):
+def _format_state(state, domain=None):
     if not state:
         return "unavailable"
     value = state.get("state", "unknown")
-    unit = state.get("attributes", {}).get("unit_of_measurement")
+    attributes = state.get("attributes", {})
+    if domain == "light" and value == "on" and attributes.get("brightness") is not None:
+        return f"on {round(attributes['brightness'] / 255 * 100)}%"
+    unit = attributes.get("unit_of_measurement")
     return f"{value} {unit}" if unit else value
 
 
@@ -779,6 +815,12 @@ def _point_in_rect(pos, rect):
 
 def handle_tap(pos, cards, client):
     for card in cards:
+        for action, rect in card.buttons.items():
+            if _point_in_rect(pos, rect):
+                step = BRIGHTNESS_STEP_PCT if action == "plus" else -BRIGHTNESS_STEP_PCT
+                log.info("Tap at %s: adjusting brightness of %s by %+d%%", pos, card.entity_id, step)
+                client.call_service("light", "turn_on", card.entity_id, {"brightness_step_pct": step})
+                return
         if _point_in_rect(pos, card.rect):
             if card.domain in TOGGLE_DOMAINS:
                 log.info("Tap at %s: toggling %s", pos, card.entity_id)
