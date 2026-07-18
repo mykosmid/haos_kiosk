@@ -83,3 +83,20 @@ configuration:
       How long each photo is shown before rotating to the next one, while
       the screensaver is active. Only relevant if Screensaver Photo
       Directory has photos in it. [Default: 300]
+  display_off_time:
+    name: "Display Off Time (HH:MM)"
+    description: |
+      Start of a nightly window during which the display goes fully dark
+      instead of showing the screensaver, e.g. "22:00" (24-hour local time).
+      The screen still shows the dashboard until the normal Screensaver
+      Timeout of no touches passes, then goes black (and the backlight is
+      switched off where the hardware supports it). Tapping wakes it back to
+      the dashboard, and it goes dark again one timeout later. The window may
+      cross midnight (off 22:00, on 07:00). Requires Screensaver Timeout > 0.
+      Leave both this and Display On Time blank to disable. [Default: blank]
+  display_on_time:
+    name: "Display On Time (HH:MM)"
+    description: |
+      End of the nightly display-off window, e.g. "07:00" (24-hour local
+      time) - after this, an idle screen shows the screensaver again as
+      normal. Must be set together with Display Off Time. [Default: blank]

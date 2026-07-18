@@ -56,6 +56,8 @@ load_config_var MIN_FREE_MEMORY_MB 100
 load_config_var SCREENSAVER_TIMEOUT_S 60
 load_config_var SCREENSAVER_PHOTO_DIR "/media/screensavers"
 load_config_var SCREENSAVER_PHOTO_INTERVAL_S 300
+load_config_var DISPLAY_OFF_TIME ""
+load_config_var DISPLAY_ON_TIME ""
 
 if [ -z "$HA_TOKEN" ] || [ -z "$ENTITIES" ]; then
     bashio::log.error "Error: HA_TOKEN and ENTITIES must be set"

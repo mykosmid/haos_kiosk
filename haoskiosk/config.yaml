@@ -72,6 +72,8 @@ options:
   screensaver_timeout_s: 60
   screensaver_photo_dir: "/media/screensavers"
   screensaver_photo_interval_s: 300
+  display_off_time: ""
+  display_on_time: ""
 
 schema:
   ha_token: password
@@ -85,6 +87,8 @@ schema:
   screensaver_timeout_s: int(0,)
   screensaver_photo_dir: str
   screensaver_photo_interval_s: int(5,)
+  display_off_time: str
+  display_on_time: str
 
 translations:
   - en

@@ -810,6 +810,66 @@ def memory_watchdog(threshold_mb, stop_event, check_interval=20):
 
 
 # ---------------------------------------------------------------------------
+# Scheduled display-off ("night mode")
+# ---------------------------------------------------------------------------
+
+def _parse_hhmm(value):
+    """Parse a "HH:MM" string into minutes-since-midnight, or None if blank
+    or malformed (logged, then ignored so a typo can't wedge the display)."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        hh, mm = value.split(":")
+        minutes = int(hh) * 60 + int(mm)
+    except (ValueError, AttributeError):
+        log.warning("Invalid display schedule time %r (expected HH:MM) - ignoring", value)
+        return None
+    if 0 <= minutes < 24 * 60:
+        return minutes
+    log.warning("Display schedule time %r out of range - ignoring", value)
+    return None
+
+
+def _fmt_hhmm(minutes):
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _in_off_window(now_min, off_min, on_min):
+    """True if now_min (minutes since local midnight) falls in the [off, on)
+    display-off window. Handles windows that wrap past midnight (e.g. off at
+    22:00, on at 07:00). Disabled (always False) unless both bounds are set
+    and distinct."""
+    if off_min is None or on_min is None or off_min == on_min:
+        return False
+    if off_min < on_min:
+        return off_min <= now_min < on_min
+    return now_min >= off_min or now_min < on_min
+
+
+def _backlight_devices():
+    base = "/sys/class/backlight"
+    try:
+        return [os.path.join(base, name) for name in os.listdir(base)]
+    except OSError:
+        return []
+
+
+def set_backlight_power(on):
+    """Best-effort backlight on/off via /sys/class/backlight/*/bl_power
+    (0 = unblank, 1 = blank). Silently does nothing when no backlight device
+    is exposed (e.g. an HDMI monitor, which offers no such control) - in that
+    case the black framebuffer frame drawn alongside this is the visible
+    fallback, so the screen goes black even if its backlight stays lit."""
+    for dev in _backlight_devices():
+        try:
+            with open(os.path.join(dev, "bl_power"), "w") as f:
+                f.write("0" if on else "1")
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -824,6 +884,11 @@ def main():
     screensaver_timeout_s = int(os.environ.get("SCREENSAVER_TIMEOUT_S", "60") or 0)
     screensaver_photo_dir = os.environ.get("SCREENSAVER_PHOTO_DIR", "").strip()
     screensaver_photo_interval_s = int(os.environ.get("SCREENSAVER_PHOTO_INTERVAL_S", "300") or 300)
+    display_off_min = _parse_hhmm(os.environ.get("DISPLAY_OFF_TIME", ""))
+    display_on_min = _parse_hhmm(os.environ.get("DISPLAY_ON_TIME", ""))
+    if (display_off_min is None) != (display_on_min is None):
+        log.warning("Both DISPLAY_OFF_TIME and DISPLAY_ON_TIME must be set for scheduled display-off - disabling it")
+        display_off_min = display_on_min = None
     shopping_list_entity = os.environ.get("SHOPPING_LIST_ENTITY", "todo.shopping_list").strip()
     if shopping_list_entity.lower() in ("", "none"):
         shopping_list_entity = None
@@ -850,6 +915,11 @@ def main():
             log.info("Screensaver photos: reading from %s", screensaver_photo_dir)
     else:
         log.info("Screensaver disabled (screensaver_timeout_s=0)")
+    if display_off_min is not None:
+        log.info(
+            "Scheduled display-off: dark from %s to %s (local time) once idle",
+            _fmt_hhmm(display_off_min), _fmt_hhmm(display_on_min),
+        )
 
     stop_event = threading.Event()
     threading.Thread(
@@ -879,17 +949,41 @@ def main():
     last_cards = []
     last_widgets = []
     last_activity = time.time()
-    screensaver_active = False
+    mode = None  # "dashboard" | "screensaver" | "dark"; None until first draw
     last_screensaver_key = None
+    set_backlight_power(True)  # in case a prior run left the backlight blanked
     try:
         while True:
             now = time.time()
+            local = time.localtime(now)
+            now_min = local.tm_hour * 60 + local.tm_min
 
-            if screensaver and not screensaver_active and now - last_activity >= screensaver_timeout_s:
-                screensaver_active = True
-                last_screensaver_key = None
+            idle = screensaver_timeout_s > 0 and now - last_activity >= screensaver_timeout_s
+            night = _in_off_window(now_min, display_off_min, display_on_min)
 
-            if screensaver_active:
+            # When idle, the display sleeps: goes dark inside the scheduled
+            # off-window, otherwise shows the screensaver. Either way a tap
+            # wakes it back to the dashboard, and it sleeps again one timeout
+            # later - so "dark" is just the night-time flavour of screensaver.
+            if idle and night:
+                new_mode = "dark"
+            elif idle and screensaver:
+                new_mode = "screensaver"
+            else:
+                new_mode = "dashboard"
+
+            if new_mode == "dark":
+                if mode != "dark":
+                    mode = "dark"
+                    fb.blit(Image.new("RGB", (fb.xres, fb.yres), (0, 0, 0)))
+                    set_backlight_power(False)
+                dirty.clear()
+            elif new_mode == "screensaver":
+                if mode != "screensaver":
+                    if mode == "dark":
+                        set_backlight_power(True)
+                    mode = "screensaver"
+                    last_screensaver_key = None
                 # HA state updates redraw neither the dashboard nor the
                 # screensaver - only the wall clock/photo rotation do, since
                 # idle is tracked purely off touch input.
@@ -898,10 +992,16 @@ def main():
                 if key != last_screensaver_key:
                     last_screensaver_key = key
                     fb.blit(screensaver.render(now))
-            elif dirty.is_set():
-                dirty.clear()
-                image, last_cards, last_widgets = renderer.render(client)
-                fb.blit(image)
+            else:  # dashboard
+                if mode != "dashboard":
+                    if mode == "dark":
+                        set_backlight_power(True)
+                    mode = "dashboard"
+                    dirty.set()
+                if dirty.is_set():
+                    dirty.clear()
+                    image, last_cards, last_widgets = renderer.render(client)
+                    fb.blit(image)
 
             fds = touch.fds()
             readable, _, _ = select.select(fds, [], [], 0.5) if fds else ([], [], [])
@@ -912,10 +1012,11 @@ def main():
                 tap = touch.process(fd)
                 if tap:
                     last_activity = time.time()
-                    if screensaver_active:
+                    if mode in ("dark", "screensaver"):
                         # First tap only wakes the display - it is not also
                         # applied to whatever dashboard element is underneath.
-                        screensaver_active = False
+                        # Clearing idle flips the mode back to dashboard next
+                        # loop, which re-enables the backlight and redraws.
                         dirty.set()
                     elif handle_widget_tap(tap, last_widgets, renderer, client):
                         dirty.set()
@@ -925,6 +1026,7 @@ def main():
         pass
     finally:
         stop_event.set()
+        set_backlight_power(True)
         fb.close()
         restore_console_cursor(console_fd)
 
