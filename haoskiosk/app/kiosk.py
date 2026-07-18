@@ -693,6 +693,12 @@ def sync_screensaver_photos(source_dir, dest_dir, target_size):
             dest_path = os.path.join(dest_dir, dest_name)
             try:
                 with Image.open(src_path) as raw:
+                    # For JPEGs, has libjpeg decode directly at (approximately)
+                    # target_size instead of full resolution - a phone photo
+                    # decoded and held at native size (often 12MP+) can spike
+                    # memory well past what's free on a 1GB Pi. No-op for
+                    # non-JPEG formats.
+                    raw.draft("RGB", target_size)
                     fitted = _fit_cover(raw.convert("RGB"), target_size[0], target_size[1])
                 fitted.save(dest_path, "JPEG", quality=85)
                 os.remove(src_path)
