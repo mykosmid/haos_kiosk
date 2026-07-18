@@ -66,48 +66,20 @@ configuration:
       normal dashboard; that tap is not also applied to the dashboard
       underneath. Set to 0 to disable the screensaver entirely.
       [Default: 60]
-  screensaver_source_dir:
-    name: "Screensaver Source Directory"
-    description: |
-      Absolute path to a "drop zone" folder for full-resolution photos, e.g.
-      "/media/screensaver_uploads" (a folder under Home Assistant's /media,
-      mapped read-write into this Add-on - drop files in there via the
-      Media or File Editor Add-on). Searched recursively.
-
-      If set, the Add-on moves every photo it finds here into Screensaver
-      Photo Directory, downscaled/cropped to exactly fill the display -
-      deleting each original from this folder once its resized copy is
-      saved. This folder is meant to sit empty between uploads; it isn't
-      mirrored or reconciled against the destination, photos just pass
-      through it once. Must not be the same folder as, or a parent of the
-      same tree you also read manually - in particular don't point this at
-      Screensaver Photo Directory itself or vice versa. Leave blank to
-      manage Screensaver Photo Directory's contents yourself instead.
-      [Default: blank]
   screensaver_photo_dir:
     name: "Screensaver Photo Directory"
     description: |
       Absolute path to the folder of photos (.jpg/.jpeg/.png/.bmp/.gif) the
-      screensaver actually rotates through full-screen.
-
-      If Screensaver Source Directory is set, this folder is the permanent,
-      Add-on-managed destination photos get moved into - to remove a photo
-      from the screensaver, delete it here directly (it won't reappear,
-      since the original in the source folder is already gone). If
-      Screensaver Source Directory is blank, populate this folder yourself;
-      photos aren't resized in that case, so pre-size them to the display's
-      resolution for best results. Leave both settings blank to show just
-      the clock/date on a black background. [Default: /media/screensavers]
+      screensaver rotates through full-screen, e.g. a folder under Home
+      Assistant's /media that's mapped into this Add-on. Populate it
+      yourself (via the Media browser, Samba, File Editor, etc.). Photos
+      are not resized by the Add-on, so pre-size them to the display's
+      resolution for best results and to keep memory use low. Leave blank
+      to show just the clock/date on a black background.
+      [Default: /media/screensavers]
   screensaver_photo_interval_s:
     name: "Screensaver Photo Interval (seconds)"
     description: |
       How long each photo is shown before rotating to the next one, while
       the screensaver is active. Only relevant if Screensaver Photo
       Directory has photos in it. [Default: 300]
-  screensaver_sync_interval_s:
-    name: "Screensaver Sync Interval (seconds)"
-    description: |
-      How often to check Screensaver Source Directory for newly-dropped
-      photos and move/resize them into Screensaver Photo Directory. Only
-      relevant if Screensaver Source Directory is configured. [Default:
-      600]

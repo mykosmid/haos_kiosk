@@ -640,87 +640,6 @@ def _load_font(candidates, size):
 
 
 # ---------------------------------------------------------------------------
-# Screensaver photo sync (moves + downscales photos out of a media drop zone)
-# ---------------------------------------------------------------------------
-
-IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".gif")
-
-
-def sync_screensaver_photos(source_dir, dest_dir, target_size):
-    """Moves image files out of source_dir (recursively) into dest_dir,
-    downscaling/cropping each one to target_size (the screen's own
-    resolution) as it goes, deleting the original only once its resized
-    copy has been saved successfully. source_dir is meant purely as a drop
-    zone - e.g. a folder under Home Assistant's /media - and dest_dir as the
-    durable, kiosk-managed photo store the screensaver actually reads from;
-    there is no reconciliation pass, since nothing is meant to persist in
-    source_dir between syncs.
-
-    dest_dir is explicitly excluded from the walk. It's commonly a
-    subfolder of source_dir (e.g. source=/media, dest=/media/screensavers),
-    and without this a naive recursive walk would pick up its own
-    already-resized output as a "new" source photo on every subsequent
-    sync, re-processing it under a new name forever - duplicating the same
-    photo a little more each cycle.
-    """
-    if not os.path.isdir(source_dir):
-        log.warning("Screensaver sync: source dir %s does not exist - skipping sync", source_dir)
-        return
-
-    source_real = os.path.realpath(source_dir)
-    dest_real = os.path.realpath(dest_dir)
-    if source_real == dest_real:
-        log.error(
-            "Screensaver sync: source and destination directories are the same (%s) - skipping sync", source_dir,
-        )
-        return
-
-    try:
-        os.makedirs(dest_dir, exist_ok=True)
-    except OSError:
-        log.exception("Screensaver sync: could not create destination dir %s", dest_dir)
-        return
-
-    processed = 0
-    for root, dirs, names in os.walk(source_dir, topdown=True):
-        dirs[:] = [d for d in dirs if os.path.realpath(os.path.join(root, d)) != dest_real]
-        for name in names:
-            if not name.lower().endswith(IMAGE_EXTS):
-                continue
-            src_path = os.path.join(root, name)
-            rel = os.path.relpath(src_path, source_dir)
-            dest_name = os.path.splitext(rel.replace(os.sep, "__"))[0] + ".jpg"
-            dest_path = os.path.join(dest_dir, dest_name)
-            try:
-                with Image.open(src_path) as raw:
-                    # For JPEGs, has libjpeg decode directly at (approximately)
-                    # target_size instead of full resolution - a phone photo
-                    # decoded and held at native size (often 12MP+) can spike
-                    # memory well past what's free on a 1GB Pi. No-op for
-                    # non-JPEG formats.
-                    raw.draft("RGB", target_size)
-                    fitted = _fit_cover(raw.convert("RGB"), target_size[0], target_size[1])
-                fitted.save(dest_path, "JPEG", quality=85)
-                os.remove(src_path)
-                processed += 1
-            except Exception:
-                log.exception("Screensaver sync: failed to process %s", src_path)
-
-    if processed:
-        log.info("Screensaver sync: moved %d new photo(s) into %s", processed, dest_dir)
-
-
-def screensaver_sync_loop(source_dir, dest_dir, target_size, interval_s, stop_event):
-    while True:
-        try:
-            sync_screensaver_photos(source_dir, dest_dir, target_size)
-        except Exception:
-            log.exception("Screensaver sync failed")
-        if stop_event.wait(interval_s):
-            return
-
-
-# ---------------------------------------------------------------------------
 # Touch input
 # ---------------------------------------------------------------------------
 
@@ -903,10 +822,8 @@ def main():
     dark_mode = os.environ.get("DARK_MODE", "true").strip().lower() == "true"
     min_free_memory_mb = int(os.environ.get("MIN_FREE_MEMORY_MB", "100") or 0)
     screensaver_timeout_s = int(os.environ.get("SCREENSAVER_TIMEOUT_S", "60") or 0)
-    screensaver_source_dir = os.environ.get("SCREENSAVER_SOURCE_DIR", "").strip()
     screensaver_photo_dir = os.environ.get("SCREENSAVER_PHOTO_DIR", "").strip()
     screensaver_photo_interval_s = int(os.environ.get("SCREENSAVER_PHOTO_INTERVAL_S", "300") or 300)
-    screensaver_sync_interval_s = int(os.environ.get("SCREENSAVER_SYNC_INTERVAL_S", "600") or 600)
     shopping_list_entity = os.environ.get("SHOPPING_LIST_ENTITY", "todo.shopping_list").strip()
     if shopping_list_entity.lower() in ("", "none"):
         shopping_list_entity = None
@@ -929,11 +846,8 @@ def main():
         log.info("Chores widget: %s", ", ".join(chores_entities))
     if screensaver_timeout_s > 0:
         log.info("Screensaver: activates after %ds idle", screensaver_timeout_s)
-        if screensaver_source_dir:
-            log.info(
-                "Screensaver photo sync: %s -> %s every %ds",
-                screensaver_source_dir, screensaver_photo_dir, screensaver_sync_interval_s,
-            )
+        if screensaver_photo_dir:
+            log.info("Screensaver photos: reading from %s", screensaver_photo_dir)
     else:
         log.info("Screensaver disabled (screensaver_timeout_s=0)")
 
@@ -946,14 +860,6 @@ def main():
     fb = Framebuffer(os.environ.get("FB_DEVICE", "/dev/fb0"))
     renderer = Renderer(fb.xres, fb.yres, entities, dark_mode, shopping_list_entity, chores_entities)
     touch = TouchInput(fb.xres, fb.yres)
-
-    if screensaver_timeout_s > 0 and screensaver_source_dir and screensaver_photo_dir:
-        sync_screensaver_photos(screensaver_source_dir, screensaver_photo_dir, (fb.xres, fb.yres))
-        threading.Thread(
-            target=screensaver_sync_loop,
-            args=(screensaver_source_dir, screensaver_photo_dir, (fb.xres, fb.yres), screensaver_sync_interval_s, stop_event),
-            name="screensaver-sync", daemon=True,
-        ).start()
 
     screensaver = (
         Screensaver(fb.xres, fb.yres, screensaver_photo_dir, screensaver_photo_interval_s)
