@@ -19,6 +19,12 @@ ingress: false
 homeassistant_api: true
 auth_api: true
 usb: true
+# Needed for the CAP_SYS_TTY_CONFIG-level access that switches the console
+# VT into graphics mode (KDSETMODE), which is what actually stops the kernel
+# fbcon driver from repainting its blinking cursor over the framebuffer.
+# The narrower privileged: capability list HA allows does not include
+# SYS_TTY_CONFIG, so full hardware access is the practical way to get it.
+full_access: true
 
 ulimits:
   nofile:
