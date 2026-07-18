@@ -847,26 +847,66 @@ def _in_off_window(now_min, off_min, on_min):
     return now_min >= off_min or now_min < on_min
 
 
-def _backlight_devices():
-    base = "/sys/class/backlight"
-    try:
-        return [os.path.join(base, name) for name in os.listdir(base)]
-    except OSError:
-        return []
+class Backlight:
+    """Best-effort control of any /sys/class/backlight devices, used to power
+    the panel down during the scheduled display-off window.
 
+    Turning off writes BOTH brightness=0 and bl_power=1: on the original Pi
+    7" DSI display's KMS panel driver, bl_power alone often doesn't actually
+    cut the backlight, but brightness=0 does; on other drivers it's the
+    reverse - so we set both and let whichever the driver honours take
+    effect. Each device's brightness is snapshotted at startup and restored
+    on wake, so waking doesn't clobber a user's chosen brightness with max.
 
-def set_backlight_power(on):
-    """Best-effort backlight on/off via /sys/class/backlight/*/bl_power
-    (0 = unblank, 1 = blank). Silently does nothing when no backlight device
-    is exposed (e.g. an HDMI monitor, which offers no such control) - in that
-    case the black framebuffer frame drawn alongside this is the visible
-    fallback, so the screen goes black even if its backlight stays lit."""
-    for dev in _backlight_devices():
+    Does nothing (harmlessly) when no backlight device is exposed, e.g. an
+    HDMI monitor - the black framebuffer frame is the visible fallback there.
+    """
+
+    def __init__(self):
+        self._devices = []  # (path, saved_brightness_or_None)
+        base = "/sys/class/backlight"
         try:
-            with open(os.path.join(dev, "bl_power"), "w") as f:
-                f.write("0" if on else "1")
+            names = sorted(os.listdir(base))
         except OSError:
-            pass
+            names = []
+        for name in names:
+            path = os.path.join(base, name)
+            self._devices.append((path, self._read_int(os.path.join(path, "brightness"))))
+        if self._devices:
+            log.info(
+                "Backlight control: found %s",
+                ", ".join(f"{os.path.basename(p)} (brightness={b})" for p, b in self._devices),
+            )
+        else:
+            log.info(
+                "Backlight control: no /sys/class/backlight device found - "
+                "display-off will draw a black screen but cannot dim the backlight"
+            )
+
+    @staticmethod
+    def _read_int(path):
+        try:
+            with open(path) as f:
+                return int(f.read().strip())
+        except (OSError, ValueError):
+            return None
+
+    def _write(self, path, value):
+        try:
+            with open(path, "w") as f:
+                f.write(str(value))
+        except OSError as exc:
+            log.warning("Backlight write %s=%s failed: %s", path, value, exc)
+
+    def set(self, on):
+        for path, saved in self._devices:
+            if on:
+                self._write(os.path.join(path, "bl_power"), 0)
+                if saved is not None:
+                    self._write(os.path.join(path, "brightness"), saved)
+            else:
+                self._write(os.path.join(path, "brightness"), 0)
+                self._write(os.path.join(path, "bl_power"), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -930,6 +970,7 @@ def main():
     fb = Framebuffer(os.environ.get("FB_DEVICE", "/dev/fb0"))
     renderer = Renderer(fb.xres, fb.yres, entities, dark_mode, shopping_list_entity, chores_entities)
     touch = TouchInput(fb.xres, fb.yres)
+    backlight = Backlight()
 
     screensaver = (
         Screensaver(fb.xres, fb.yres, screensaver_photo_dir, screensaver_photo_interval_s)
@@ -951,7 +992,7 @@ def main():
     last_activity = time.time()
     mode = None  # "dashboard" | "screensaver" | "dark"; None until first draw
     last_screensaver_key = None
-    set_backlight_power(True)  # in case a prior run left the backlight blanked
+    backlight.set(True)  # in case a prior run left the backlight blanked
     try:
         while True:
             now = time.time()
@@ -976,12 +1017,12 @@ def main():
                 if mode != "dark":
                     mode = "dark"
                     fb.blit(Image.new("RGB", (fb.xres, fb.yres), (0, 0, 0)))
-                    set_backlight_power(False)
+                    backlight.set(False)
                 dirty.clear()
             elif new_mode == "screensaver":
                 if mode != "screensaver":
                     if mode == "dark":
-                        set_backlight_power(True)
+                        backlight.set(True)
                     mode = "screensaver"
                     last_screensaver_key = None
                 # HA state updates redraw neither the dashboard nor the
@@ -995,7 +1036,7 @@ def main():
             else:  # dashboard
                 if mode != "dashboard":
                     if mode == "dark":
-                        set_backlight_power(True)
+                        backlight.set(True)
                     mode = "dashboard"
                     dirty.set()
                 if dirty.is_set():
@@ -1026,7 +1067,7 @@ def main():
         pass
     finally:
         stop_event.set()
-        set_backlight_power(True)
+        backlight.set(True)
         fb.close()
         restore_console_cursor(console_fd)
 
