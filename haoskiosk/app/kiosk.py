@@ -309,7 +309,10 @@ class Renderer:
         # any widget is shown (freeing the whole right half for widgets), and
         # spans the full screen when neither is configured.
         self.entity_area = (0, 0, width // 2 if self.widgets else width, height)
-        self.cols = 3 if len(entity_ids) > 6 else 2
+        # 2 or fewer entities stack into a single column (one card per row)
+        # instead of sitting side by side, since a lone pair of lights reads
+        # better as two stacked horizontal bars than two tall vertical ones.
+        self.cols = 1 if len(entity_ids) <= 2 else (3 if len(entity_ids) > 6 else 2)
         self.rows = math.ceil(len(entity_ids) / self.cols) if entity_ids else 1
 
     def render(self, client):
