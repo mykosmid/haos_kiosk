@@ -86,6 +86,14 @@ Card = collections.namedtuple("Card", ["rect", "entity_id", "domain", "buttons"]
 FBIOGET_VSCREENINFO = 0x4600
 FBIOGET_FSCREENINFO = 0x4602
 
+# FBIOBLANK (see <linux/fb.h>) powers the panel down/up through the fb device
+# itself. Unlike /sys/class/backlight, this works over the already-open
+# /dev/fb0 fd, so it doesn't need a writable /sys (which the add-on container
+# doesn't have - those nodes are on a read-only mount).
+FBIOBLANK = 0x4611
+FB_BLANK_UNBLANK = 0
+FB_BLANK_POWERDOWN = 4
+
 # Linux VT ioctl (see <linux/kd.h>) used to hide the console cursor.
 KDSETMODE = 0x4B3A
 KD_TEXT = 0x00
@@ -212,6 +220,21 @@ class Framebuffer:
             for y in range(self.yres):
                 self.mm.seek(y * self.line_length)
                 self.mm.write(raw[y * row_bytes:(y + 1) * row_bytes])
+
+    def blank(self, blank):
+        """Power the panel down (blank=True) or back up via FBIOBLANK on the
+        framebuffer fd. Whether this cuts the backlight depends on the panel
+        driver, but on the Pi's KMS fbdev emulation FB_BLANK_POWERDOWN drives
+        the display's power state off. Best-effort: warns once if the driver
+        rejects the ioctl, then stays quiet so it can't spam the log on every
+        night-mode transition."""
+        try:
+            fcntl.ioctl(self.fd, FBIOBLANK, FB_BLANK_POWERDOWN if blank else FB_BLANK_UNBLANK)
+        except OSError as exc:
+            if not getattr(self, "_blank_unsupported", False):
+                self._blank_unsupported = True
+                log.warning("Framebuffer FBIOBLANK not supported by this driver (%s); "
+                            "night mode will show a black screen without powering the panel off", exc)
 
     def close(self):
         try:
@@ -864,6 +887,8 @@ class Backlight:
 
     def __init__(self):
         self._devices = []  # (path, saved_brightness_or_None)
+        self._dead = set()  # device paths that failed a write (e.g. read-only /sys)
+        self._last_error = None
         base = "/sys/class/backlight"
         try:
             names = sorted(os.listdir(base))
@@ -896,10 +921,13 @@ class Backlight:
             with open(path, "w") as f:
                 f.write(str(value))
         except OSError as exc:
-            log.warning("Backlight write %s=%s failed: %s", path, value, exc)
+            self._last_error = exc
 
     def set(self, on):
         for path, saved in self._devices:
+            if path in self._dead:
+                continue
+            self._last_error = None
             if on:
                 self._write(os.path.join(path, "bl_power"), 0)
                 if saved is not None:
@@ -907,6 +935,15 @@ class Backlight:
             else:
                 self._write(os.path.join(path, "brightness"), 0)
                 self._write(os.path.join(path, "bl_power"), 1)
+            if self._last_error is not None:
+                # /sys is read-only in the add-on container, so these writes
+                # fail; warn once per device, then stay quiet and let
+                # Framebuffer.blank() (FBIOBLANK) do the actual work.
+                self._dead.add(path)
+                log.warning(
+                    "Backlight %s not writable (%s) - relying on FBIOBLANK / black screen instead",
+                    os.path.basename(path), self._last_error,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -972,6 +1009,13 @@ def main():
     touch = TouchInput(fb.xres, fb.yres)
     backlight = Backlight()
 
+    def set_display_power(on):
+        # FBIOBLANK on the fb device is the mechanism that actually works in
+        # the container (writable fd, no /sys needed); the sysfs backlight
+        # write is a best-effort secondary for setups where /sys is writable.
+        fb.blank(not on)
+        backlight.set(on)
+
     screensaver = (
         Screensaver(fb.xres, fb.yres, screensaver_photo_dir, screensaver_photo_interval_s)
         if screensaver_timeout_s > 0 else None
@@ -992,7 +1036,7 @@ def main():
     last_activity = time.time()
     mode = None  # "dashboard" | "screensaver" | "dark"; None until first draw
     last_screensaver_key = None
-    backlight.set(True)  # in case a prior run left the backlight blanked
+    set_display_power(True)  # in case a prior run left the panel blanked
     try:
         while True:
             now = time.time()
@@ -1017,12 +1061,12 @@ def main():
                 if mode != "dark":
                     mode = "dark"
                     fb.blit(Image.new("RGB", (fb.xres, fb.yres), (0, 0, 0)))
-                    backlight.set(False)
+                    set_display_power(False)
                 dirty.clear()
             elif new_mode == "screensaver":
                 if mode != "screensaver":
                     if mode == "dark":
-                        backlight.set(True)
+                        set_display_power(True)
                     mode = "screensaver"
                     last_screensaver_key = None
                 # HA state updates redraw neither the dashboard nor the
@@ -1036,7 +1080,7 @@ def main():
             else:  # dashboard
                 if mode != "dashboard":
                     if mode == "dark":
-                        backlight.set(True)
+                        set_display_power(True)
                     mode = "dashboard"
                     dirty.set()
                 if dirty.is_set():
@@ -1067,7 +1111,7 @@ def main():
         pass
     finally:
         stop_event.set()
-        backlight.set(True)
+        set_display_power(True)
         fb.close()
         restore_console_cursor(console_fd)
 
